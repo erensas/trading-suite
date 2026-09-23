@@ -17,9 +17,9 @@ app.get(['/health', '/api/health'], (req, res) => {
   res.json({ status: 'ok', service: 'trading-suite', timestamp: new Date().toISOString() });
 });
 
-// PostgreSQL Pool for Main Database
+// PostgreSQL Pool for Dedicated Trade Database
 const postgresPool = new Pool({
-  database: process.env.PG_MAIN_DB || 'postgres',
+  database: process.env.PG_MAIN_DB || 'trade_db',
   user: process.env.DB_USER || process.env.PGUSER || 'openclaw',
   host: process.env.DB_HOST || process.env.PGHOST || '/var/run/postgresql',
   password: process.env.DB_PASSWORD || process.env.PGPASSWORD || '',

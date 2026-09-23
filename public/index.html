@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unified Trading Suite - Port 18795</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background-color: #020617; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; }
+    pre, code, .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* Header */
+    header { background-color: #0f172a; border-bottom: 1px solid #1e293b; position: sticky; top: 0; z-index: 50; }
+    .header-inner { max-width: 1440px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .logo-box { width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #10b981, #0284c7); display: flex; align-items: center; justify-content: center; font-size: 22px; color: white; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25); }
+    .header-title { font-size: 19px; font-weight: 700; color: white; display: flex; align-items: center; gap: 10px; }
+    .badge-port { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 9999px; background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .header-sub { font-size: 12px; color: #94a3b8; }
+
+    /* Top KPI Stats Ribbon */
+    .kpi-ribbon { background-color: #020617; border-bottom: 1px solid #1e293b; padding: 10px 24px; display: flex; align-items: center; justify-content: space-around; flex-wrap: wrap; gap: 16px; }
+    .kpi-item { display: flex; align-items: center; gap: 12px; }
+    .kpi-icon { width: 36px; height: 36px; border-radius: 10px; background-color: #0f172a; border: 1px solid #1e293b; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #38bdf8; }
+    .kpi-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; }
+    .kpi-val { font-size: 16px; font-weight: 700; color: #f8fafc; }
+    
+    /* Navigation Tabs */
+    .nav-tabs { max-width: 1440px; margin: 0 auto; padding: 8px 24px; display: flex; gap: 8px; overflow-x: auto; border-top: 1px solid #1e293b; }
+    .tab-btn { padding: 9px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: transparent; color: #94a3b8; transition: all 0.2s; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .tab-btn:hover { color: #f1f5f9; background-color: #1e293b; }
+    .tab-btn.active { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3); }
+
+    /* Main Container */
+    main { max-width: 1440px; margin: 0 auto; padding: 20px 24px; flex: 1; width: 100%; display: flex; flex-direction: column; gap: 20px; }
+    .hidden { display: none !important; }
+
+    /* Grid Layouts */
+    .grid-chart-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+
+    /* Cards */
+    .card { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 20px; position: relative; display: flex; flex-direction: column; gap: 12px; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 10px; }
+    .card-title { font-size: 13px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px; }
+
+    /* Chart Container */
+    #chart-wrapper { width: 100%; height: 480px; background-color: #020617; border-radius: 12px; border: 1px solid #1e293b; overflow: hidden; position: relative; }
+
+    /* Order Entry Panel */
+    .order-panel { display: flex; flex-direction: column; gap: 14px; background: #020617; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 11px; font-weight: 600; color: #94a3b8; }
+    .form-group input, .form-group select { background-color: #0f172a; border: 1px solid #1e293b; color: #f8fafc; padding: 10px 14px; border-radius: 8px; font-size: 13px; outline: none; }
+    .btn-buy { background: linear-gradient(135deg, #10b981, #059669); color: white; font-weight: 700; padding: 12px; border-radius: 8px; border: none; cursor: pointer; transition: opacity 0.2s; }
+    .btn-sell { background: linear-gradient(135deg, #f43f5e, #e11d48); color: white; font-weight: 700; padding: 12px; border-radius: 8px; border: none; cursor: pointer; transition: opacity 0.2s; }
+    .btn-buy:hover, .btn-sell:hover { opacity: 0.9; }
+
+    /* Tables */
+    .table-container { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 16px; overflow-x: auto; }
+    table { width: 100%; text-align: left; border-collapse: collapse; font-size: 12px; }
+    th { padding: 12px 16px; color: #94a3b8; background-color: #020617; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; border-bottom: 1px solid #1e293b; }
+    td { padding: 12px 16px; border-bottom: 1px solid rgba(30, 41, 59, 0.6); }
+    tr:hover { background-color: rgba(30, 41, 59, 0.4); cursor: pointer; }
+
+    /* Badges / Pills */
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    .pill-green { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .pill-blue { background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+    .pill-red { background-color: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); }
+    .pill-purple { background-color: rgba(139, 92, 246, 0.15); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); }
+
+    /* News Feed Cards */
+    .news-item { padding: 12px; background: #020617; border: 1px solid #1e293b; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .news-title { font-size: 13px; font-weight: 600; color: #f1f5f9; text-decoration: none; }
+    .news-title:hover { color: #38bdf8; }
+    .news-meta { font-size: 11px; color: #64748b; display: flex; justify-content: space-between; }
+
+    /* Log Console */
+    .log-box { background-color: #020617; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #a7f3d0; height: 380px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; }
+
+    @media (max-width: 1024px) {
+      .grid-chart-layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="header-inner">
+      <div style="display: flex; align-items: center; gap: 14px;">
+        <div class="logo-box"><i class="fa-solid fa-chart-line"></i></div>
+        <div>
+          <div class="header-title">
+            UNIFIED TRADING SUITE
+            <span class="badge-port">PORT 18795</span>
+          </div>
+          <div class="header-sub">Database-Centric Multi-Asset Trading Engine & Interactive Analytics</div>
+        </div>
+      </div>
+      <div>
+        <span class="pill pill-green"><i class="fa-solid fa-database"></i> POSTGRES & SQLITE LIVE SYNCHRONIZED</span>
+      </div>
+    </div>
+
+    <!-- Top KPI Ribbon -->
+    <div class="kpi-ribbon">
+      <div class="kpi-item">
+        <div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div>
+        <div>
+          <div class="kpi-label">Toplam Gerçekleşen PnL</div>
+          <div class="kpi-val" id="kpi-pnl">$0.00</div>
+        </div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-icon"><i class="fa-solid fa-shield-halved"></i></div>
+        <div>
+          <div class="kpi-label">Aktif Sermaye (Dry-Run)</div>
+          <div class="kpi-val">$1,000.00 USDT</div>
+        </div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div>
+        <div>
+          <div class="kpi-label">Win Rate %</div>
+          <div class="kpi-val" id="kpi-winrate">85.4%</div>
+        </div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-icon"><i class="fa-solid fa-brain"></i></div>
+        <div>
+          <div class="kpi-label">LLM Profit Score</div>
+          <div class="kpi-val" style="color: #34d399;" id="kpi-score">92.5 / 100</div>
+        </div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div>
+        <div>
+          <div class="kpi-label">Sistem Durumu</div>
+          <div class="kpi-val" style="color: #38bdf8;">ACTIVE & PROTECTED</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="nav-tabs">
+      <button class="tab-btn active" onclick="switchTab('chart')"><i class="fa-solid fa-chart-candlestick"></i> Chart & Trade Markers</button>
+      <button class="tab-btn" onclick="switchTab('screener')"><i class="fa-solid fa-list-check"></i> Market Screener (DB)</button>
+      <button class="tab-btn" onclick="switchTab('dex')"><i class="fa-solid fa-bolt"></i> Web3 DEX Flashloan</button>
+      <button class="tab-btn" onclick="switchTab('freqtrade')"><i class="fa-solid fa-robot"></i> Freqtrade Spot Bot</button>
+      <button class="tab-btn" onclick="switchTab('multiasset')"><i class="fa-solid fa-globe"></i> CEX & TradFi Suite</button>
+      <button class="tab-btn" onclick="switchTab('testlab')"><i class="fa-solid fa-flask"></i> Strategy Test Lab</button>
+      <button class="tab-btn" onclick="switchTab('settings')"><i class="fa-solid fa-sliders"></i> Settings & Control</button>
+      <button class="tab-btn" onclick="switchTab('logs')"><i class="fa-solid fa-terminal"></i> Live Log Stream (SSE)</button>
+    </div>
+  </header>
+
+  <!-- Main Area -->
+  <main>
+
+    <!-- Tab 1: Interactive Charting & Trade Markers -->
+    <div id="tab-chart" class="tab-content">
+      <div class="grid-chart-layout">
+        
+        <!-- Chart Column -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fa-solid fa-chart-line"></i> TRADINGVIEW CHART & DB TRADE MARKERS - <span id="active-symbol-title" style="color: #f8fafc;">ETH/USDT</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <span class="pill pill-blue" id="active-category-pill">DEX</span>
+              <span class="pill pill-green"><i class="fa-solid fa-arrows-rotate"></i> Auto-Syncing</span>
+            </div>
+          </div>
+
+          <!-- TradingView Container -->
+          <div id="chart-wrapper"></div>
+        </div>
+
+        <!-- Side Panel: Order Entry, Economist Advice & News -->
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          
+          <!-- Order / Test Entry Panel -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fa-solid fa-paper-plane"></i> TEST ORDER ENTRY PANEL</div>
+            </div>
+            <div class="order-panel">
+              <div class="form-group">
+                <label>Seçili Parite</label>
+                <input type="text" id="order-symbol" value="ETH/USDT" readonly style="background: #1e293b; color: #38bdf8; font-weight: 700;">
+              </div>
+              <div class="form-group">
+                <label>İşlem Yönü</label>
+                <select id="order-side">
+                  <option value="BUY">BUY (AL) - Simülasyon</option>
+                  <option value="SELL">SELL (SAT) - Simülasyon</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Miktar / Stake (USDT)</label>
+                <input type="number" id="order-amount" value="500" step="50">
+              </div>
+              <button class="btn-buy" onclick="submitTestOrder()"><i class="fa-solid fa-bolt"></i> EMİR GÖNDER & CHART'A EŞLE</button>
+            </div>
+          </div>
+
+          <!-- Economist Pair Recommendation -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fa-solid fa-brain"></i> ECONOMIST ADVICE FOR <span id="econ-symbol">ETH/USDT</span></div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #94a3b8;">Profit Score:</span>
+                <span id="econ-score" style="font-weight: 700; color: #34d399;">88.50 / 100</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #94a3b8;">Risk Seviyesi:</span>
+                <span id="econ-risk" class="pill pill-purple">DÜŞÜK RISK</span>
+              </div>
+              <div style="background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 10px; color: #f1f5f9; line-height: 1.5;" id="econ-text">
+                Yükleniyor...
+              </div>
+            </div>
+          </div>
+
+          <!-- Market News Feed -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="fa-solid fa-newspaper"></i> CANLI PİYASA HABERLERİ</div>
+            </div>
+            <div id="news-container" style="display: flex; flex-direction: column; gap: 10px; max-height: 220px; overflow-y: auto;">
+              <!-- News items populated dynamically -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Tab 2: Database Market Screener -->
+    <div id="tab-screener" class="tab-content hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fa-solid fa-list-check"></i> DATABASE INSTRUMENT MARKET SCREENER</div>
+          <input type="text" id="screener-search" placeholder="Parite Ara (ETH, STG, SPY)..." onkeyup="filterScreener()" style="width: 240px;">
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Sembol / Parite</th>
+                <th>Kategori</th>
+                <th>Borsa / DEX</th>
+                <th>Son Fiyat</th>
+                <th>24s Değişim</th>
+                <th>24s Hacim</th>
+                <th>Economist Skor</th>
+                <th>İşlem</th>
+              </tr>
+            </thead>
+            <tbody id="screener-tbody">
+              <!-- Dynamically populated from DB -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Web3 DEX Flashloan Arbitrage -->
+    <div id="tab-dex" class="tab-content hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fa-solid fa-bolt"></i> WEB3 DEX FLASHLOAN ARBITRAGE EXECUTIONS & LOGS</div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tarih</th>
+                <th>Eylem</th>
+                <th>Girdi Miktarı</th>
+                <th>Çıktı Miktarı</th>
+                <th>Gas Harcaması</th>
+                <th>Net Kâr (USD)</th>
+                <th>Durum</th>
+              </tr>
+            </thead>
+            <tbody id="dex-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Freqtrade Spot Bot -->
+    <div id="tab-freqtrade" class="tab-content hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fa-solid fa-robot"></i> FREQTRADE LLM SPOT BOT POSITIONS & TRADES</div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Parite</th>
+                <th>Alış Fiyatı</th>
+                <th>Satış Fiyatı</th>
+                <th>Stake Miktarı</th>
+                <th>Açılış Tarihi</th>
+                <th>Kapanış Tarihi</th>
+                <th>Gerçekleşen PnL</th>
+                <th>Durum</th>
+              </tr>
+            </thead>
+            <tbody id="freqtrade-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 5: Multi-Asset CEX & TradFi Suite -->
+    <div id="tab-multiasset" class="tab-content hidden">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fa-solid fa-coins"></i> HIGH-APY CEX FUNDING RATE CASH & CARRY</div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Sembol</th>
+                  <th>Borsa</th>
+                  <th>Spot/Futures</th>
+                  <th>Funding Rate %</th>
+                  <th>Net APY %</th>
+                  <th>Tavsiye</th>
+                </tr>
+              </thead>
+              <tbody id="cex-funding-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fa-solid fa-building-columns"></i> IBKR TRADFI DELTA-NEUTRAL COVERED CALLS</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12px;" id="ibkr-container">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 6: Strategy Test Lab -->
+    <div id="tab-testlab" class="tab-content hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fa-solid fa-flask"></i> STRATEGY TEST LAB & SIMULATION BENCH</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <p style="font-size: 13px; color: #94a3b8;">Test etmek istediğiniz strateji parametrelerini belirleyin ve simülasyonu çalıştırın.</p>
+          <div class="grid-3">
+            <div class="form-group">
+              <label>Min Profit Guard Eşiği ($)</label>
+              <input type="number" value="1.00" id="test-min-profit" step="0.10">
+            </div>
+            <div class="form-group">
+              <label>Max Kayma (Slippage %)</label>
+              <input type="number" value="1.0" id="test-slippage" step="0.1">
+            </div>
+            <div class="form-group">
+              <label>Max Gas Limit (Gwei)</label>
+              <input type="number" value="25" id="test-gas">
+            </div>
+          </div>
+          <button class="btn-buy" onclick="runSimulationTest()"><i class="fa-solid fa-play"></i> SİMÜLASYONU VE STRATEJİ BENCHMARK'I SÜR</button>
+          <div id="sim-result" style="background: #020617; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #a7f3d0; display: none;">
+            <!-- Test result output -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 7: Settings & Control Panel -->
+    <div id="tab-settings" class="tab-content hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fa-solid fa-sliders"></i> DYNAMIC SYSTEM CONTROL & PROFIT GUARD SETTINGS</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div class="form-group">
+            <label>Profit Guard Kârlılık Eşiği ($ USD)</label>
+            <input type="number" id="setting-profit-threshold" value="1.00" step="0.10" style="width: 200px;">
+          </div>
+          <button class="btn-buy" style="width: 220px;" onclick="saveSettings()"><i class="fa-solid fa-save"></i> AYARLARI KAYDET</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 8: Live Log Stream -->
+    <div id="tab-logs" class="tab-content hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fa-solid fa-terminal"></i> REAL-TIME SUPERVISOR & TRADING SSE LOG STREAM</div>
+          <button class="pill pill-blue" onclick="clearLogs()"><i class="fa-solid fa-trash"></i> Logları Temizle</button>
+        </div>
+        <div class="log-box" id="log-console">Log akışı başlatılıyor...</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

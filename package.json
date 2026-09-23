@@ -1,0 +1,13 @@
+{
+  "name": "unified-trading-suite",
+  "version": "1.0.0",
+  "description": "Unified Trading Suite Web Dashboard & Analytics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.11.5"
+  }
+}

@@ -28,7 +28,14 @@ postgresPool.on('error', (err) => {
 
 const SUPERVISOR_LOG_PATH = '/home/openclaw/.openclaw/worktrees/web3-dex-bot/web3-dex-bot/supervisor/supervisor.log';
 const SYSTEM_DASHBOARD_HEALTH = process.env.SYSTEM_DASHBOARD_HEALTH || 'http://127.0.0.1:18791/health';
-const providerCtx = { freqtradeApi: (...args) => freqtradeApi(...args) };
+const providerCtx = {
+  freqtradeApi: (...args) => freqtradeApi(...args),
+  // GeckoTerminal: remember the pool found by search, unless the user set a provider symbol.
+  pinPool: (symbol, providerSymbol) =>
+    postgresPool
+      .query("UPDATE instrument_registry SET provider_symbol = $2 WHERE symbol = $1 AND COALESCE(provider_symbol, '') = ''", [symbol, providerSymbol])
+      .catch((e) => console.error('pinPool failed:', e.message)),
+};
 
 const sendError = (res, err, fallbackStatus = 500) =>
   res.status(err.status || fallbackStatus).json({ success: false, error: err.message, unsupported: !!err.unsupported });
@@ -440,7 +447,7 @@ app.get('/api/trading/candles', async (req, res) => {
       throw e;
     }
     let source = provider.name;
-    if (adapter.describe) source = await adapter.describe(provider, inst).catch(() => source);
+    if (adapter.describe) source = await adapter.describe(provider, inst, providerCtx).catch(() => source);
     const body = { success: true, symbol, timeframe: tf, provider: { id: provider.id, name: provider.name, kind: provider.kind }, source, candles };
     candleCache.delete(key);
     candleCache.set(key, { at: Date.now(), body });
@@ -503,19 +510,41 @@ async function refreshTickers() {
     // GeckoTerminal is rate limited per IP, so its instruments go through one worker.
     const geckoQueue = jobs.filter((row) => row.p_kind === 'geckoterminal');
     const queue = jobs.filter((row) => row.p_kind !== 'geckoterminal');
+    const providerOf = (row) => ({ id: row.p_id, name: row.p_name, kind: row.p_kind, base_url: row.p_base_url, config: row.p_config || {}, credential_env: row.p_credential_env });
+    const save = async (row, t) => {
+      if (t instanceof Error) throw t;
+      if (t.price === null || !Number.isFinite(t.price)) throw new Error('no price');
+      const clampPct = (v) => (Number.isFinite(v) ? Math.max(-999999, Math.min(999999, v)) : null);
+      const clampVol = (v) => (Number.isFinite(v) ? Math.min(v, 9.9e15) : null);
+      await postgresPool.query(
+        'UPDATE instrument_registry SET last_price = $2, change_24h_pct = $3, volume_24h_usd = $4, updated_at = NOW() WHERE symbol = $1',
+        [row.symbol, t.price, clampPct(t.changePct), clampVol(t.volumeUsd)]
+      );
+    };
+    // Adapters with a batch call (GeckoTerminal) get all their instruments at once.
+    const batch = async (rows) => {
+      const groups = new Map();
+      rows.forEach((row) => (groups.get(row.p_id) || groups.set(row.p_id, []).get(row.p_id)).push(row));
+      for (const group of groups.values()) {
+        const provider = providerOf(group[0]);
+        const results = await adapterFor(provider).tickers(provider, group, providerCtx);
+        for (const row of group) {
+          try {
+            await save(row, results.get(row.symbol) || new Error('no result'));
+            updated++;
+          } catch (e) {
+            failed++;
+            errors[row.symbol] = e.message.slice(0, 200);
+          }
+        }
+      }
+    };
     const worker = async (queue) => {
       while (queue.length) {
         const row = queue.shift();
-        const provider = { id: row.p_id, name: row.p_name, kind: row.p_kind, base_url: row.p_base_url, config: row.p_config || {}, credential_env: row.p_credential_env };
+        const provider = providerOf(row);
         try {
-          const t = await adapterFor(provider).ticker(provider, row, providerCtx);
-          if (t.price === null || !Number.isFinite(t.price)) throw new Error('no price');
-          const clampPct = (v) => (Number.isFinite(v) ? Math.max(-999999, Math.min(999999, v)) : null);
-          const clampVol = (v) => (Number.isFinite(v) ? Math.min(v, 9.9e15) : null);
-          await postgresPool.query(
-            'UPDATE instrument_registry SET last_price = $2, change_24h_pct = $3, volume_24h_usd = $4, updated_at = NOW() WHERE symbol = $1',
-            [row.symbol, t.price, clampPct(t.changePct), clampVol(t.volumeUsd)]
-          );
+          await save(row, await adapterFor(provider).ticker(provider, row, providerCtx));
           updated++;
         } catch (e) {
           if (!e.unsupported) {
@@ -525,7 +554,7 @@ async function refreshTickers() {
         }
       }
     };
-    await Promise.all([worker(queue), worker(queue), worker(queue), worker(geckoQueue)]);
+    await Promise.all([worker(queue), worker(queue), worker(queue), batch(geckoQueue)]);
   } catch (e) {
     if (e.code !== UNDEFINED_TABLE) errors._ = e.message;
   } finally {

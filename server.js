@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const https = require('https');
 const { DatabaseSync } = require('node:sqlite');
 
@@ -103,9 +104,7 @@ function getFreqtradeDbHandle() {
 let dynamicSettings = {
   profitGuardThresholdUsd: 1.00,
   maxSlippagePct: 1.0,
-  executionMode: 'DRY-RUN',
-  maxDrawdownLimitUsd: 50.00,
-  riskSentinelTriggered: false
+  maxDrawdownLimitUsd: 50.00
 };
 
 // In-Memory Multi-Asset Data Cache & Background Worker
@@ -235,11 +234,10 @@ app.get('/api/trading/settings', (req, res) => {
 
 app.post('/api/trading/settings', async (req, res) => {
   try {
-    const { profitGuardThresholdUsd, maxSlippagePct, executionMode, maxDrawdownLimitUsd } = req.body;
+    const { profitGuardThresholdUsd, maxSlippagePct, maxDrawdownLimitUsd } = req.body;
 
     if (profitGuardThresholdUsd !== undefined) dynamicSettings.profitGuardThresholdUsd = parseFloat(profitGuardThresholdUsd);
     if (maxSlippagePct !== undefined) dynamicSettings.maxSlippagePct = parseFloat(maxSlippagePct);
-    if (executionMode) dynamicSettings.executionMode = executionMode.toUpperCase();
     if (maxDrawdownLimitUsd !== undefined) dynamicSettings.maxDrawdownLimitUsd = parseFloat(maxDrawdownLimitUsd);
 
     await postgresPool.query(`
@@ -469,7 +467,7 @@ app.post('/api/trading/orders', async (req, res) => {
 
     const insertRes = await postgresPool.query(`
       INSERT INTO manual_orders (symbol, side, order_type, amount, price, status, pnl_usd)
-      VALUES ($1, $2, $3, $4, $5, 'EXECUTED', 0.00)
+      VALUES ($1, $2, $3, $4, $5, 'SIMULATED', 0.00)
       RETURNING *;
     `, [symbol, side.toUpperCase(), order_type || 'MARKET', amount, price || null]);
 
@@ -487,46 +485,49 @@ app.get('/api/trading/multi-asset', (req, res) => {
 // 11. API: Overall Executive Overview
 app.get('/api/trading/overview', async (req, res) => {
   try {
-    const tradeLogsRes = await postgresPool.query(`SELECT count(*), COALESCE(sum(amount_out - amount_in), 0) as net_pnl FROM trade_logs;`);
+    const tradeLogsRes = await postgresPool.query(`SELECT count(*), COALESCE(sum(amount_out - amount_in), 0) as net_pnl FROM trade_logs WHERE status IS DISTINCT FROM 'INVALID_SYNTHETIC';`);
     const dexStats = tradeLogsRes.rows[0] || { count: 0, net_pnl: 0 };
 
     let openTradesCount = 0;
     let closedTradesCount = 0;
     let freqPnl = 0;
+    let closedWins = 0;
 
     // Fetch Freqtrade statistics from Postgres trade_db first, fallback to SQLite
     try {
       const pgOpen = await postgresPool.query('SELECT count(*) as cnt FROM trades WHERE is_open = true;');
-      const pgClosed = await postgresPool.query('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl FROM trades WHERE is_open = false;');
+      const pgClosed = await postgresPool.query('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl, count(*) FILTER (WHERE realized_profit > 0) as wins FROM trades WHERE is_open = false;');
       openTradesCount = parseInt(pgOpen.rows[0].cnt || 0, 10);
       closedTradesCount = parseInt(pgClosed.rows[0].cnt || 0, 10);
       freqPnl = parseFloat(pgClosed.rows[0].pnl || 0);
+      closedWins = parseInt(pgClosed.rows[0].wins || 0, 10);
     } catch (pgErr) {
       const db = getFreqtradeDbHandle();
       if (db) {
         try {
           const openRes = db.prepare('SELECT count(*) as cnt FROM trades WHERE is_open = 1').get();
-          const closedRes = db.prepare('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl FROM trades WHERE is_open = 0').get();
+          const closedRes = db.prepare('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl, COALESCE(sum(CASE WHEN realized_profit > 0 THEN 1 ELSE 0 END), 0) as wins FROM trades WHERE is_open = 0').get();
           openTradesCount = openRes ? openRes.cnt : 0;
           closedTradesCount = closedRes ? closedRes.cnt : 0;
           freqPnl = closedRes ? parseFloat(closedRes.pnl || 0) : 0;
+          closedWins = closedRes ? closedRes.wins : 0;
         } catch(e) {}
       }
     }
 
     const totalPnlUsd = (parseFloat(dexStats.net_pnl || 0) + freqPnl).toFixed(2);
+    const control = await getControlState().catch(() => ({ installed: false }));
 
     res.json({
       success: true,
       summary: {
         totalRealizedPnlUsd: totalPnlUsd,
         activeCapitalUsd: '1,000.00',
-        winRatePercent: '85.4',
-        profitScore: '92.5',
+        winRatePercent: closedTradesCount > 0 ? ((closedWins / closedTradesCount) * 100).toFixed(1) : null,
+        profitScore: null,
         openTradesCount: openTradesCount,
         totalExecutedTrades: parseInt(dexStats.count, 10) + closedTradesCount,
-        systemStatus: dynamicSettings.riskSentinelTriggered ? 'CIRCUIT BREAKER TRIGGERED' : 'ACTIVE & PROTECTED',
-        executionMode: dynamicSettings.executionMode,
+        systemStatus: !control.installed ? 'CONTROL PLANE NOT INSTALLED' : control.halted ? 'HALTED' : 'ACTIVE',
         profitGuardThresholdUsd: dynamicSettings.profitGuardThresholdUsd
       }
     });
@@ -649,6 +650,7 @@ app.get('/api/trading/dex-arbitrage', async (req, res) => {
       SELECT id, created_at, action, amount_in, amount_out, gas_used, status,
              (CAST(amount_out AS NUMERIC) - CAST(amount_in AS NUMERIC)) as pnl_usd
       FROM trade_logs 
+      WHERE status IS DISTINCT FROM 'INVALID_SYNTHETIC'
       ORDER BY created_at DESC LIMIT 50;
     `);
     res.json({ success: true, count: dbRes.rows.length, trades: dbRes.rows });
@@ -671,6 +673,230 @@ app.get('/api/trading/freqtrade', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+
+// ---------------------------------------------------------------------------
+// Trading control plane: kill switch and real engine modes (2026-09-26).
+// State lives in trade_db (db/migrations/001_trading_control.sql). Each engine reads the
+// switch on its own; this service writes it, pauses Freqtrade, and reports engine modes.
+// ---------------------------------------------------------------------------
+const FREQTRADE_API_URL = process.env.FREQTRADE_API_URL || 'http://127.0.0.1:8080';
+const ENGINE_STALE_SECONDS = 180;
+const UNDEFINED_TABLE = '42P01';
+
+function readFreqtradeCredentials() {
+  let user = process.env.FREQTRADE_USER;
+  let pass = process.env.FREQTRADE_PASS;
+  if (!user || !pass) {
+    try {
+      const file = path.join(os.homedir(), '.openclaw', 'credentials', 'freqtrade.env');
+      for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+        const match = line.match(/^(FREQTRADE_USER|FREQTRADE_PASS)=(.*)$/);
+        if (!match) continue;
+        const value = match[2].trim().replace(/^['"]|['"]$/g, '');
+        if (match[1] === 'FREQTRADE_USER' && !user) user = value;
+        if (match[1] === 'FREQTRADE_PASS' && !pass) pass = value;
+      }
+    } catch (e) {}
+  }
+  return { user, pass };
+}
+
+let freqtradeToken = null;
+let freqtradeTokenExpiry = 0;
+
+async function freqtradeApi(method, apiPath) {
+  if (!freqtradeToken || Date.now() > freqtradeTokenExpiry) {
+    const { user, pass } = readFreqtradeCredentials();
+    if (!user || !pass) throw new Error('Freqtrade API credentials not configured');
+    const login = await fetch(`${FREQTRADE_API_URL}/api/v1/token/login`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!login.ok) throw new Error(`Freqtrade login failed: HTTP ${login.status}`);
+    freqtradeToken = (await login.json()).access_token;
+    freqtradeTokenExpiry = Date.now() + 10 * 60 * 1000;
+  }
+  const res = await fetch(`${FREQTRADE_API_URL}/api/v1${apiPath}`, {
+    method,
+    headers: { Authorization: `Bearer ${freqtradeToken}` },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (res.status === 401) freqtradeToken = null;
+  if (!res.ok) throw new Error(`Freqtrade ${method} ${apiPath}: HTTP ${res.status}`);
+  return res.json();
+}
+
+async function getControlState() {
+  try {
+    const r = await postgresPool.query(
+      'SELECT halted, reason, changed_by, changed_at FROM trading_control WHERE id = 1'
+    );
+    if (!r.rows.length) return { installed: false };
+    return { installed: true, ...r.rows[0] };
+  } catch (e) {
+    if (e.code === UNDEFINED_TABLE) return { installed: false };
+    throw e;
+  }
+}
+
+async function getFreqtradeEngine() {
+  try {
+    const cfg = await freqtradeApi('GET', '/show_config');
+    return {
+      engine: 'freqtrade',
+      mode: cfg.dry_run ? 'DRY_RUN' : 'LIVE',
+      state: String(cfg.state || 'unknown').toUpperCase(),
+      detail: { strategy: cfg.strategy, runmode: cfg.runmode },
+    };
+  } catch (e) {
+    return { engine: 'freqtrade', mode: 'UNKNOWN', state: 'OFFLINE', detail: { error: e.message } };
+  }
+}
+
+async function getHeartbeatEngines() {
+  let rows = [];
+  try {
+    const r = await postgresPool.query(`
+      SELECT engine, mode, state, detail, last_seen,
+             EXTRACT(EPOCH FROM (NOW() - last_seen)) AS age_seconds
+      FROM engine_status ORDER BY engine;
+    `);
+    rows = r.rows.map((row) => ({
+      engine: row.engine,
+      mode: row.mode,
+      state: Number(row.age_seconds) > ENGINE_STALE_SECONDS ? 'OFFLINE' : row.state,
+      last_seen: row.last_seen,
+      detail: row.detail,
+    }));
+  } catch (e) {
+    if (e.code !== UNDEFINED_TABLE) throw e;
+  }
+  if (!rows.some((row) => row.engine === 'web3-dex-bot')) {
+    rows.push({ engine: 'web3-dex-bot', mode: 'UNKNOWN', state: 'NOT_REPORTING', detail: null });
+  }
+  return rows;
+}
+
+// A cross-site page can send neither the custom header nor a matching Origin (CSRF guard).
+function requireControlRequest(req, res, next) {
+  if (req.get('X-Trading-Control') !== '1') {
+    return res.status(403).json({ success: false, error: 'Missing X-Trading-Control header' });
+  }
+  const origin = req.get('Origin');
+  if (origin) {
+    let originHost = null;
+    try {
+      originHost = new URL(origin).host;
+    } catch (e) {}
+    if (originHost !== req.get('Host')) {
+      return res.status(403).json({ success: false, error: 'Cross-origin control request rejected' });
+    }
+  }
+  next();
+}
+
+function controlActor(req) {
+  return `trading-suite UI (${req.get('X-Forwarded-For') || req.ip})`;
+}
+
+async function writeControlState(halted, reason, changedBy) {
+  const client = await postgresPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'UPDATE trading_control SET halted = $1, reason = $2, changed_by = $3, changed_at = NOW() WHERE id = 1',
+      [halted, reason, changedBy]
+    );
+    await client.query(
+      'INSERT INTO trading_control_audit (halted, reason, changed_by) VALUES ($1, $2, $3)',
+      [halted, reason, changedBy]
+    );
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+app.get('/api/control/status', async (req, res) => {
+  try {
+    const [control, freqtrade, heartbeat] = await Promise.all([
+      getControlState(),
+      getFreqtradeEngine(),
+      getHeartbeatEngines(),
+    ]);
+    res.json({ success: true, control, engines: [freqtrade, ...heartbeat] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/control/halt', requireControlRequest, async (req, res) => {
+  try {
+    const control = await getControlState();
+    if (!control.installed) {
+      return res.status(409).json({
+        success: false,
+        error: 'Control plane not installed: apply db/migrations/001_trading_control.sql',
+      });
+    }
+    const reason = String((req.body && req.body.reason) || 'Manual kill switch').slice(0, 200);
+    await writeControlState(true, reason, controlActor(req));
+
+    const results = { database: 'halted' };
+    try {
+      await freqtradeApi('POST', '/pause');
+      results.freqtrade = 'paused (open trades managed, no new entries)';
+    } catch (e) {
+      results.freqtrade = `pause failed: ${e.message}; entries stay blocked by confirm_trade_entry`;
+    }
+    results['web3-dex-bot'] = 'reads trading_control; scanner stops transmitting';
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/control/resume', requireControlRequest, async (req, res) => {
+  try {
+    if (!req.body || req.body.confirm !== 'RESUME') {
+      return res.status(400).json({ success: false, error: 'Type RESUME to confirm' });
+    }
+    const control = await getControlState();
+    if (!control.installed) {
+      return res.status(409).json({ success: false, error: 'Control plane not installed' });
+    }
+    await writeControlState(false, 'Resumed from trading-suite UI', controlActor(req));
+
+    const results = { database: 'resumed' };
+    try {
+      await freqtradeApi('POST', '/start');
+      results.freqtrade = 'running';
+    } catch (e) {
+      results.freqtrade = `start failed: ${e.message}`;
+    }
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Keep Freqtrade paused while halted, e.g. after it restarts in its initial "running" state.
+setInterval(async () => {
+  try {
+    const control = await getControlState();
+    if (!control.installed || !control.halted) return;
+    const cfg = await freqtradeApi('GET', '/show_config');
+    if (String(cfg.state).toLowerCase() === 'running') {
+      await freqtradeApi('POST', '/pause');
+      console.log('[control] Trading halted: re-paused Freqtrade after it reported state "running".');
+    }
+  } catch (e) {}
+}, 30000);
 
 app.listen(PORT, HOST, () => {
   console.log(`Unified Trading Suite running on http://${HOST}:${PORT}`);

@@ -245,7 +245,7 @@ function calculateEMA(candles, period) {
 // Load DB Chart Overlays / Markers
 async function loadChartMarkers(symbol) {
   try {
-    const res = await fetch(`/api/trading/chart-markers?symbol=${encodeURIComponent(symbol)}`);
+    const res = await fetch(`api/trading/chart-markers?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
     if (data.success && data.markers) {
@@ -259,7 +259,7 @@ async function loadChartMarkers(symbol) {
 // Load Orderbook Depth Data
 async function loadOrderbook(symbol) {
   try {
-    const res = await fetch(`/api/trading/orderbook?symbol=${encodeURIComponent(symbol)}`);
+    const res = await fetch(`api/trading/orderbook?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
     const pill = document.getElementById('ob-symbol-pill');
@@ -316,7 +316,7 @@ function renderOrderbook(bids, asks) {
 // Load All Instruments from Database
 async function loadPairs() {
   try {
-    const res = await fetch('/api/trading/pairs');
+    const res = await fetch('api/trading/pairs');
     const data = await res.json();
 
     if (data.success) {
@@ -386,7 +386,7 @@ function filterScreener() {
 // Load Economist Advice
 async function loadEconomistAdvice(symbol) {
   try {
-    const res = await fetch(`/api/trading/economist?symbol=${encodeURIComponent(symbol)}`);
+    const res = await fetch(`api/trading/economist?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
     if (data.success && data.signal) {
@@ -400,7 +400,7 @@ async function loadEconomistAdvice(symbol) {
 // Load Market News
 async function loadNews(symbol) {
   try {
-    const res = await fetch(`/api/trading/news?symbol=${encodeURIComponent(symbol)}`);
+    const res = await fetch(`api/trading/news?symbol=${encodeURIComponent(symbol)}`);
     const data = await res.json();
 
     const container = document.getElementById('news-container');
@@ -456,7 +456,7 @@ async function submitTestOrder() {
   const amount = parseFloat(document.getElementById('order-amount').value || 100);
 
   try {
-    const res = await fetch('/api/trading/orders', {
+    const res = await fetch('api/trading/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbol, side, amount })
@@ -499,7 +499,7 @@ function showToast(title, message, type = 'info') {
 // Load Multi-Asset Data
 async function loadMultiAssetData() {
   try {
-    const res = await fetch('/api/trading/multi-asset');
+    const res = await fetch('api/trading/multi-asset');
     const data = await res.json();
 
     if (data.success && data.cex_funding_arbitrage) {
@@ -542,13 +542,15 @@ async function loadMultiAssetData() {
 // Load Overall Executive Overview
 async function loadOverview() {
   try {
-    const res = await fetch('/api/trading/overview');
+    const res = await fetch('api/trading/overview');
     const data = await res.json();
 
     if (data.success && data.summary) {
       document.getElementById('kpi-pnl').innerText = `$${data.summary.totalRealizedPnlUsd} USD`;
-      document.getElementById('kpi-winrate').innerText = `${data.summary.winRatePercent}%`;
-      document.getElementById('kpi-score').innerText = `${data.summary.profitScore} / 100`;
+      const winRate = data.summary.winRatePercent;
+      document.getElementById('kpi-winrate').innerText = winRate === null || winRate === undefined ? '-' : `${winRate}%`;
+      const score = data.summary.profitScore;
+      document.getElementById('kpi-score').innerText = score === null || score === undefined ? '-' : `${score} / 100`;
     }
   } catch (e) {}
 }
@@ -558,7 +560,7 @@ function initSSELogStream() {
   const consoleBox = document.getElementById('log-console');
   if (!consoleBox) return;
 
-  const evtSource = new EventSource('/api/trading/logs/stream');
+  const evtSource = new EventSource('api/trading/logs/stream');
   evtSource.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
@@ -579,7 +581,7 @@ function clearLogs() {
 // Load Web3 DEX Flashloan Arbitrage Executions from trade_logs
 async function loadDexTrades() {
   try {
-    const res = await fetch('/api/trading/dex-arbitrage');
+    const res = await fetch('api/trading/dex-arbitrage');
     const data = await res.json();
 
     const tbody = document.getElementById('dex-tbody');
@@ -613,7 +615,7 @@ async function loadDexTrades() {
 // Load Freqtrade Spot Trades from trades table
 async function loadFreqtradeTrades() {
   try {
-    const res = await fetch('/api/trading/freqtrade');
+    const res = await fetch('api/trading/freqtrade');
     const data = await res.json();
 
     const tbody = document.getElementById('freqtrade-tbody');

@@ -111,9 +111,52 @@
     @media (max-width: 1024px) {
       .grid-chart-layout { grid-template-columns: 1fr; }
     }
+
+    /* Unified shell: control bar, engine mode badges, kill switch, embedded dashboards */
+    .control-bar { position: sticky; top: 0; z-index: 70; height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 24px; background: #0b1120; border-bottom: 1px solid #1e293b; }
+    .control-bar.is-halted { background: #4c0519; border-bottom-color: #f43f5e; }
+    .shell-nav { display: flex; gap: 6px; }
+    .view-btn { padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: transparent; color: #94a3b8; text-decoration: none; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .view-btn:hover { color: #f1f5f9; background-color: #1e293b; }
+    .view-btn.active { color: #f8fafc; background-color: #1e293b; border-color: #334155; }
+    .engine-badges { display: flex; gap: 8px; flex: 1; justify-content: flex-end; overflow: hidden; }
+    .engine-badge { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px; border: 1px solid; white-space: nowrap; }
+    .engine-badge.mode-dry { color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.1); }
+    .engine-badge.mode-live { color: #fb7185; border-color: rgba(244, 63, 94, 0.6); background: rgba(244, 63, 94, 0.15); }
+    .engine-badge.mode-unknown { color: #94a3b8; border-color: #334155; background: #0f172a; }
+    .halt-status { font-size: 12px; font-weight: 700; color: #fecdd3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+    .kill-btn { padding: 8px 14px; border-radius: 8px; border: 1px solid #f43f5e; background: #be123c; color: white; font-size: 12px; font-weight: 800; letter-spacing: 0.04em; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+    .kill-btn:hover { background: #e11d48; }
+    .kill-btn:disabled { background: #334155; border-color: #475569; color: #94a3b8; cursor: not-allowed; }
+    .kill-btn.resume-btn { background: #065f46; border-color: #10b981; }
+    .kill-btn.resume-btn:hover { background: #047857; }
+    #view-trading header { top: 52px; }
+    .embed-view iframe { display: block; width: 100%; height: calc(100vh - 52px); border: 0; background: #020617; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(2, 6, 23, 0.75); display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .modal-card { width: 100%; max-width: 440px; background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+    .modal-title { font-size: 16px; font-weight: 700; color: #f8fafc; }
+    .modal-text { font-size: 13px; color: #cbd5e1; line-height: 1.5; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+    .btn-secondary { padding: 9px 14px; border-radius: 8px; border: 1px solid #334155; background: transparent; color: #cbd5e1; font-weight: 600; cursor: pointer; }
+    @media (max-width: 900px) { .engine-badges { display: none; } .control-bar { padding: 0 12px; gap: 8px; } }
   </style>
 </head>
 <body>
+
+  <!-- Unified shell: one entry point for the trading, system and FreqUI dashboards -->
+  <div id="control-bar" class="control-bar">
+    <nav class="shell-nav" aria-label="Dashboards">
+      <button type="button" class="view-btn active" data-view="trading"><i class="fa-solid fa-chart-line"></i> Trading</button>
+      <button type="button" class="view-btn" data-view="system"><i class="fa-solid fa-server"></i> Sistem</button>
+      <button type="button" class="view-btn" data-view="frequi"><i class="fa-solid fa-robot"></i> FreqUI</button>
+      <a class="view-btn" href="../" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> OpenClaw</a>
+    </nav>
+    <div id="halt-status" class="halt-status hidden"></div>
+    <div id="engine-badges" class="engine-badges"><span class="engine-badge mode-unknown">Mod yükleniyor…</span></div>
+    <button type="button" id="kill-switch-btn" class="kill-btn" disabled><i class="fa-solid fa-power-off"></i> KILL SWITCH</button>
+  </div>
+
+  <div id="view-trading" class="app-view">
 
   <!-- Header -->
   <header>
@@ -153,21 +196,21 @@
         <div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div>
         <div>
           <div class="kpi-label">Win Rate %</div>
-          <div class="kpi-val" id="kpi-winrate">85.4%</div>
+          <div class="kpi-val" id="kpi-winrate">-</div>
         </div>
       </div>
       <div class="kpi-item">
         <div class="kpi-icon"><i class="fa-solid fa-brain"></i></div>
         <div>
           <div class="kpi-label">LLM Profit Score</div>
-          <div class="kpi-val" style="color: #34d399;" id="kpi-score">92.5 / 100</div>
+          <div class="kpi-val" style="color: #34d399;" id="kpi-score">-</div>
         </div>
       </div>
       <div class="kpi-item">
         <div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div>
         <div>
           <div class="kpi-label">Sistem Durumu</div>
-          <div class="kpi-val" style="color: #38bdf8;">ACTIVE & PROTECTED</div>
+          <div class="kpi-val" style="color: #94a3b8;" id="kpi-control">-</div>
         </div>
       </div>
     </div>
@@ -361,8 +404,8 @@
               <button class="tf-btn" onclick="filterScreenerCat('TRADFI', this)">TRADFI (4)</button>
             </div>
             <input type="text" id="screener-search" placeholder="Parite Ara (ETH, STG, SPY)..." onkeyup="filterScreener()" style="width: 180px;">
-            <a href="/api/trading/export/trades?format=csv" download class="pill pill-green" style="text-decoration: none;"><i class="fa-solid fa-file-csv"></i> CSV İndir</a>
-            <a href="/api/trading/export/trades?format=json" download class="pill pill-blue" style="text-decoration: none;"><i class="fa-solid fa-file-code"></i> JSON İndir</a>
+            <a href="api/trading/export/trades?format=csv" download class="pill pill-green" style="text-decoration: none;"><i class="fa-solid fa-file-csv"></i> CSV İndir</a>
+            <a href="api/trading/export/trades?format=json" download class="pill pill-blue" style="text-decoration: none;"><i class="fa-solid fa-file-code"></i> JSON İndir</a>
           </div>
         </div>
         <div class="table-container">
@@ -393,8 +436,8 @@
         <div class="card-header">
           <div class="card-title"><i class="fa-solid fa-bolt"></i> WEB3 DEX FLASHLOAN ARBITRAGE EXECUTIONS & LOGS</div>
           <div style="display: flex; gap: 10px;">
-            <a href="/api/trading/export/trades?format=csv" download class="pill pill-green" style="text-decoration: none;"><i class="fa-solid fa-file-csv"></i> CSV İndir</a>
-            <a href="/api/trading/export/trades?format=json" download class="pill pill-blue" style="text-decoration: none;"><i class="fa-solid fa-file-code"></i> JSON İndir</a>
+            <a href="api/trading/export/trades?format=csv" download class="pill pill-green" style="text-decoration: none;"><i class="fa-solid fa-file-csv"></i> CSV İndir</a>
+            <a href="api/trading/export/trades?format=json" download class="pill pill-blue" style="text-decoration: none;"><i class="fa-solid fa-file-code"></i> JSON İndir</a>
           </div>
         </div>
         <div class="table-container">
@@ -425,8 +468,8 @@
         <div class="card-header">
           <div class="card-title"><i class="fa-solid fa-robot"></i> FREQTRADE LLM SPOT BOT POSITIONS & TRADES</div>
           <div style="display: flex; gap: 10px;">
-            <a href="/api/trading/export/trades?format=csv" download class="pill pill-green" style="text-decoration: none;"><i class="fa-solid fa-file-csv"></i> CSV İndir</a>
-            <a href="/api/trading/export/trades?format=json" download class="pill pill-blue" style="text-decoration: none;"><i class="fa-solid fa-file-code"></i> JSON İndir</a>
+            <a href="api/trading/export/trades?format=csv" download class="pill pill-green" style="text-decoration: none;"><i class="fa-solid fa-file-csv"></i> CSV İndir</a>
+            <a href="api/trading/export/trades?format=json" download class="pill pill-blue" style="text-decoration: none;"><i class="fa-solid fa-file-code"></i> JSON İndir</a>
           </div>
         </div>
         <div class="table-container">
@@ -547,10 +590,35 @@
     </div>
 
   </main>
+  </div>
+
+  <div id="view-system" class="app-view embed-view hidden">
+    <iframe data-src="../sys-dashboard/" title="System Dashboard"></iframe>
+  </div>
+  <div id="view-frequi" class="app-view embed-view hidden">
+    <iframe data-src="../frequi/" title="FreqUI"></iframe>
+  </div>
+
+  <!-- Kill switch / resume confirmation -->
+  <div id="control-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="control-modal-title">
+    <div class="modal-card">
+      <div id="control-modal-title" class="modal-title"></div>
+      <div id="control-modal-text" class="modal-text"></div>
+      <div class="form-group">
+        <label id="control-modal-label" for="control-modal-input"></label>
+        <input id="control-modal-input" type="text" autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" data-modal-action="cancel">Vazgeç</button>
+        <button type="button" id="control-modal-confirm" class="kill-btn" data-modal-action="confirm"></button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast Container -->
   <div id="toast-container"></div>
 
+  <script src="shell.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

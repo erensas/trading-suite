@@ -27,7 +27,7 @@ function renderEngines(engines) {
   const box = document.getElementById('engine-badges');
   if (!box) return;
   if (!Array.isArray(engines) || !engines.length) {
-    box.innerHTML = '<span class="engine-badge mode-unknown">Mod bilinmiyor</span>';
+    box.innerHTML = '<span class="engine-badge mode-unknown">Mode unknown</span>';
     return;
   }
   box.innerHTML = engines
@@ -54,19 +54,19 @@ function renderControl(control) {
   bar.classList.toggle('is-halted', halted);
   status.classList.toggle('hidden', !halted);
   if (halted) {
-    const when = control.changed_at ? new Date(control.changed_at).toLocaleString('tr-TR') : '-';
-    status.textContent = `TRADING DURDURULDU · ${control.reason || '-'} · ${control.changed_by || '-'} · ${when}`;
+    const when = control.changed_at ? new Date(control.changed_at).toLocaleString('en-GB') : '-';
+    status.textContent = `TRADING HALTED · ${control.reason || '-'} · ${control.changed_by || '-'} · ${when}`;
   }
 
   btn.disabled = !installed;
   btn.classList.toggle('resume-btn', halted);
   btn.innerHTML = halted
-    ? '<i class="fa-solid fa-play"></i> DEVAM ETTİR'
+    ? '<i class="fa-solid fa-play"></i> RESUME'
     : '<i class="fa-solid fa-power-off"></i> KILL SWITCH';
-  btn.title = installed ? '' : 'Kontrol tablosu kurulmadı (db/migrations/001_trading_control.sql)';
+  btn.title = installed ? '' : 'Control table not installed (db/migrations/001_trading_control.sql)';
 
   if (kpi) {
-    kpi.textContent = !installed ? 'KONTROL KURULMADI' : halted ? 'DURDURULDU' : 'AKTİF';
+    kpi.textContent = !installed ? 'NOT INSTALLED' : halted ? 'HALTED' : 'ACTIVE';
     kpi.style.color = !installed ? '#94a3b8' : halted ? '#fb7185' : '#34d399';
   }
 }
@@ -91,16 +91,16 @@ function openControlModal(mode) {
   modalMode = mode;
   const halting = mode === 'halt';
   document.getElementById('control-modal-title').textContent = halting
-    ? 'Tüm trading durdurulsun mu?'
-    : 'Trading devam ettirilsin mi?';
+    ? 'Halt all trading?'
+    : 'Resume trading?';
   document.getElementById('control-modal-text').textContent = halting
-    ? 'Freqtrade yeni pozisyon açmayı bırakır (açık pozisyonlar kurallarına göre yönetilmeye devam eder), Web3 scanner sinyal göndermeyi keser, bridge forcebuy reddedilir.'
-    : 'Freqtrade yeniden başlatılır ve motorlar yeni işleme açılır. Onay için RESUME yazın.';
-  document.getElementById('control-modal-label').textContent = halting ? 'Sebep (isteğe bağlı)' : 'Onay';
+    ? 'Freqtrade stops opening positions (open positions are still managed by their rules), the Web3 scanner stops transmitting, and bridge forcebuy is rejected.'
+    : 'Freqtrade is started again and the engines accept new trades. Type RESUME to confirm.';
+  document.getElementById('control-modal-label').textContent = halting ? 'Reason (optional)' : 'Confirmation';
   input.value = '';
   input.placeholder = halting ? 'Manual kill switch' : 'RESUME';
   const confirmBtn = document.getElementById('control-modal-confirm');
-  confirmBtn.textContent = halting ? 'DURDUR' : 'DEVAM ETTİR';
+  confirmBtn.textContent = halting ? 'HALT' : 'RESUME';
   confirmBtn.classList.toggle('resume-btn', !halting);
   modal.classList.remove('hidden');
   input.focus();
@@ -118,7 +118,7 @@ async function submitControlModal() {
   const input = document.getElementById('control-modal-input');
   const value = input ? input.value.trim() : '';
   if (!halting && value !== 'RESUME') {
-    showToast('Onay gerekli', 'Devam ettirmek için RESUME yazın.', 'error');
+    showToast('Confirmation required', 'Type RESUME to resume trading.', 'error');
     return;
   }
 
@@ -135,10 +135,10 @@ async function submitControlModal() {
     const summary = Object.entries(data.results || {})
       .map(([engine, result]) => `${escapeHtml(engine)}: ${escapeHtml(result)}`)
       .join('<br>');
-    showToast(halting ? 'Trading durduruldu' : 'Trading devam ediyor', summary, halting ? 'error' : 'success');
+    showToast(halting ? 'Trading halted' : 'Trading resumed', summary, halting ? 'error' : 'success');
     closeControlModal();
   } catch (e) {
-    showToast('Kontrol hatası', escapeHtml(e.message), 'error');
+    showToast('Control error', escapeHtml(e.message), 'error');
   } finally {
     if (confirmBtn) confirmBtn.disabled = false;
     loadControlStatus();

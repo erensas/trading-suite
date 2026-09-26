@@ -651,41 +651,6 @@ async function loadDexTrades() {
   }
 }
 
-async function loadMultiAsset() {
-  try {
-    const d = await fetch('api/trading/multi-asset').then((r) => r.json());
-    $('multiasset-status').textContent = d.timestamp ? `Runner data from ${fmtTime(d.timestamp)}` : `Runner: ${d.status || 'no data'}`;
-    const opp = (d.cex_funding_arbitrage && d.cex_funding_arbitrage.opportunities) || [];
-    $('cex-funding-tbody').innerHTML = opp.length
-      ? opp
-          .slice(0, 12)
-          .map((o) => `
-            <tr><td><strong>${esc(o.symbol)}</strong></td><td>${esc(o.exchange)}</td>
-              <td class="r mono">${fmtPrice(o.spot_price)} / ${fmtPrice(o.futures_price)}</td>
-              <td class="r">${esc(o.funding_rate_pct)}%</td><td class="r pos">${esc(o.net_apy_pct)}%</td>
-              <td><span class="pill pill-green">${esc(o.recommendation)}</span></td></tr>`)
-          .join('')
-      : '<tr><td colspan="6" class="empty">No opportunities.</td></tr>';
-    const ib = d.ibkr_tradfi;
-    if (ib && ib.account) {
-      const a = ib.account;
-      const s = ib.delta_neutral_strategy || {};
-      $('ibkr-container').className = 'kv-grid';
-      $('ibkr-container').innerHTML = `
-        <div class="kv"><div class="k">Net liquidation</div><div class="v">${fmtUsd(a.net_liquidation)} ${esc(a.currency || '')}</div></div>
-        <div class="kv"><div class="k">Cash</div><div class="v">${fmtUsd(a.cash_balance)}</div></div>
-        <div class="kv"><div class="k">Buying power</div><div class="v">${fmtUsd(a.buying_power)}</div></div>
-        <div class="kv"><div class="k">${esc(s.strategy || 'Strategy')} (${esc(s.underlying || '-')})</div><div class="v">${esc(s.status || '-')}</div></div>
-        <div class="kv"><div class="k">Annualized theta yield</div><div class="v">${s.annualized_theta_yield_pct ?? '-'}%</div></div>`;
-    } else {
-      $('ibkr-container').className = 'muted';
-      $('ibkr-container').textContent = 'No IBKR data from the multi-asset runner.';
-    }
-  } catch (e) {
-    $('multiasset-status').textContent = e.message;
-  }
-}
-
 function initLogStream() {
   const box = $('log-console');
   const source = new EventSource('api/trading/logs/stream');
@@ -712,7 +677,6 @@ function showTab(tab) {
   if (tab === 'screener') loadPairs();
   if (tab === 'freqtrade') loadFreqtradeTab();
   if (tab === 'dex') loadDexTrades();
-  if (tab === 'multiasset') loadMultiAsset();
   document.dispatchEvent(new CustomEvent('ts:tab', { detail: tab }));
 }
 TS.showTab = showTab;

@@ -9,7 +9,7 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 - **Markets**: pair list, chart and side panel in one view. A searchable pair picker sits above the chart (press `/`), and the list can be hidden. The chart shows candles and volume from the instrument's data provider, SMA/EMA overlays, and Freqtrade, Web3 and test-order markers. The side panel holds the order book (where the provider has one), a simulated test order, the economist signal, news and a risk calculator.
 - **Screener**: every active instrument with price, 24 h change and volume, provider and economist score. Click a row to chart it.
 - **Freqtrade**: live bot configuration, performance, whitelist and open trades from the Freqtrade API, plus trade history from `trade_db`.
-- **Web3 DEX**, **CEX & TradFi**, **Logs**: executions, multi-asset runner output, and the live Web3 supervisor log.
+- **Web3 DEX** and **Logs**: Web3 executions and the live Web3 supervisor log. CEX trading is the Freqtrade view.
 - **Settings**:
   - General and risk settings, stored in `suite_settings`.
   - Data providers: add, edit, test or disable a provider.

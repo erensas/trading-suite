@@ -1,6 +1,6 @@
 const express = require('express');
 const { Pool } = require('pg');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -101,7 +101,6 @@ app.get(['/metrics', '/api/metrics'], async (req, res) => {
       },
       settings,
       ticker_refresh: tickerRefreshState,
-      multi_asset_cache_status: multiAssetCache.status || 'unknown',
     };
 
     if (req.headers.accept && req.headers.accept.includes('text/plain')) {
@@ -713,50 +712,6 @@ app.post('/api/trading/orders', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Multi-asset runner (CEX funding carry, IBKR paper account).
-// ---------------------------------------------------------------------------
-let multiAssetCache = { success: false, status: 'loading' };
-
-function refreshMultiAssetData() {
-  const runnerPath = '/home/openclaw/.openclaw/workspace/supervisor/multi_asset_runner.py';
-  if (!fs.existsSync(runnerPath)) {
-    multiAssetCache = { success: false, status: 'runner not found' };
-    return;
-  }
-  exec(`python3 ${runnerPath}`, { timeout: 15000 }, (error, stdout) => {
-    if (error) {
-      multiAssetCache = { ...multiAssetCache, success: !!multiAssetCache.cex_funding_arbitrage, status: `runner failed: ${error.message.slice(0, 120)}` };
-      return;
-    }
-    try {
-      multiAssetCache = { success: true, ...JSON.parse(stdout) };
-    } catch (e) {
-      multiAssetCache = { ...multiAssetCache, status: 'runner returned invalid JSON' };
-    }
-  });
-}
-refreshMultiAssetData();
-setInterval(refreshMultiAssetData, 30000);
-
-app.get('/api/trading/multi-asset', (req, res) => {
-  res.json(multiAssetCache);
-});
-
-app.get('/api/trading/ibkr/option-chain', (req, res) => {
-  const strat = multiAssetCache.ibkr_tradfi && multiAssetCache.ibkr_tradfi.delta_neutral_strategy;
-  if (!strat) return res.status(503).json({ success: false, error: 'No IBKR data from the multi-asset runner' });
-  res.json({
-    success: true,
-    symbol: req.query.symbol || strat.underlying || 'SPY',
-    underlying_price: strat.spot_price,
-    strike: strat.strike,
-    annualized_yield_pct: strat.annualized_theta_yield_pct,
-    portfolio_greeks: strat.portfolio_greeks,
-    legs: strat.legs,
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Overview, trade tables, exports, log stream.
 // ---------------------------------------------------------------------------
 app.get('/api/trading/overview', async (req, res) => {
@@ -992,7 +947,7 @@ app.post('/api/trading/services/:id/:action', requireControlRequest, (req, res) 
   const allowed = ['trading-suite.service', 'web3-dex-bot.service', 'freqtrade.service', 'system-dashboard.service'];
   if (!allowed.includes(req.params.id)) return res.status(403).json({ success: false, error: 'Unauthorized service control.' });
   if (req.params.action !== 'status') return res.status(400).json({ success: false, error: 'Only "status" is supported here; use the System view to start or stop services.' });
-  exec(`systemctl is-active ${req.params.id}`, { timeout: 5000 }, (error, stdout) => {
+  execFile('systemctl', ['is-active', req.params.id], { timeout: 5000 }, (error, stdout) => {
     res.json({ success: true, service: req.params.id, state: String(stdout || '').trim() || 'unknown' });
   });
 });

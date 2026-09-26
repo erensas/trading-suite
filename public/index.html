@@ -39,7 +39,6 @@
         <button class="tab-btn" data-tab="screener"><i class="fa-solid fa-list-check"></i> Screener</button>
         <button class="tab-btn" data-tab="freqtrade"><i class="fa-solid fa-robot"></i> Freqtrade</button>
         <button class="tab-btn" data-tab="dex"><i class="fa-solid fa-bolt"></i> Web3 DEX</button>
-        <button class="tab-btn" data-tab="multiasset"><i class="fa-solid fa-globe"></i> CEX &amp; TradFi</button>
         <button class="tab-btn" data-tab="settings"><i class="fa-solid fa-sliders"></i> Settings</button>
         <button class="tab-btn" data-tab="logs"><i class="fa-solid fa-terminal"></i> Logs</button>
       </div>
@@ -216,26 +215,6 @@
               <thead><tr><th>ID</th><th>Time</th><th>Action</th><th>Token</th><th class="r">In</th><th class="r">Out</th><th class="r">Gas</th><th class="r">Net</th><th>Status</th></tr></thead>
               <tbody id="dex-tbody"></tbody>
             </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- CEX & TradFi -->
-      <section id="tab-multiasset" class="tab-content hidden">
-        <div class="muted small" id="multiasset-status"></div>
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-header"><div class="card-title"><i class="fa-solid fa-coins"></i> Funding-rate cash &amp; carry</div></div>
-            <div class="table-container">
-              <table>
-                <thead><tr><th>Symbol</th><th>Exchange</th><th class="r">Spot / Futures</th><th class="r">Funding</th><th class="r">Net APY</th><th>Recommendation</th></tr></thead>
-                <tbody id="cex-funding-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><div class="card-title"><i class="fa-solid fa-building-columns"></i> IBKR delta-neutral covered calls</div></div>
-            <div id="ibkr-container" class="muted">No IBKR data.</div>
           </div>
         </div>
       </section>

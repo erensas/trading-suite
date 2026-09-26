@@ -10,6 +10,36 @@ const app = express();
 const PORT = process.env.PORT || 18795;
 const HOST = process.env.HOST || '127.0.0.1';
 
+app.disable('x-powered-by');
+
+// Security headers. Scripts come from this app and jsDelivr (chart library) only; inline
+// styles stay allowed, inline scripts do not. The shell embeds the system dashboard (same
+// origin) and FreqUI (same host, Caddy ports 8181 / 8443), so frame-src names that host.
+const CSP_BASE = [
+  "default-src 'self'",
+  "script-src 'self' https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com",
+  "font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
+app.use((req, res, next) => {
+  const host = /^[a-z0-9.-]+$/i.test(req.hostname || '') ? req.hostname : null;
+  const frameSrc = host ? `frame-src 'self' http://${host}:8181 https://${host}:8443` : "frame-src 'self'";
+  res.set({
+    'Content-Security-Policy': `${CSP_BASE}; ${frameSrc}`,
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Referrer-Policy': 'same-origin',
+  });
+  next();
+});
+
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 

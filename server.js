@@ -74,6 +74,31 @@ app.get(['/health', '/api/health'], (req, res) => {
   res.json({ status: 'ok', service: 'trading-suite', timestamp: new Date().toISOString() });
 });
 
+// Readiness: the database must answer; Freqtrade is reported but optional, since the
+// suite still serves charts and settings while the bot is stopped. deploy.sh checks this.
+app.get(['/ready', '/api/ready'], async (req, res) => {
+  const checks = {};
+  let ready = true;
+  try {
+    await postgresPool.query('SELECT 1');
+    checks.database = 'ok';
+  } catch (e) {
+    checks.database = e.message;
+    ready = false;
+  }
+  try {
+    await freqtradeApi('GET', '/ping');
+    checks.freqtrade = 'ok';
+  } catch (e) {
+    checks.freqtrade = `unavailable: ${e.message}`;
+  }
+  if (shuttingDown) {
+    checks.shutdown = 'in progress';
+    ready = false;
+  }
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not ready', checks });
+});
+
 app.get(['/metrics', '/api/metrics'], async (req, res) => {
   try {
     const mem = process.memoryUsage();
@@ -186,6 +211,7 @@ app.post('/api/trading/settings', requireControlRequest, async (req, res) => {
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
       [next, controlActor(req)]
     );
+    await audit(req, 'update', 'settings', 'suite', settings, next);
     Object.assign(settings, next);
     settingsPersisted = true;
     // The web3 scanner reads its profit guard from economist_signals.
@@ -276,6 +302,7 @@ app.post('/api/providers', requireControlRequest, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${PROVIDER_COLUMNS}`,
       [p.name, p.kind, p.base_url, p.enabled, p.config, p.credential_env]
     );
+    await audit(req, 'create', 'provider', r.rows[0].id, null, r.rows[0]);
     res.json({ success: true, provider: r.rows[0] });
   } catch (err) {
     res.status(err.code === '23505' ? 409 : 400).json({ success: false, error: err.code === '23505' ? 'A provider with this name exists' : err.message });
@@ -292,6 +319,7 @@ app.put('/api/providers/:id', requireControlRequest, async (req, res) => {
        WHERE id = $1 RETURNING ${PROVIDER_COLUMNS}`,
       [existing.id, p.name, p.kind, p.base_url, p.enabled, p.config, p.credential_env]
     );
+    await audit(req, 'update', 'provider', existing.id, existing, r.rows[0]);
     candleCache.clear();
     res.json({ success: true, provider: r.rows[0] });
   } catch (err) {
@@ -301,8 +329,9 @@ app.put('/api/providers/:id', requireControlRequest, async (req, res) => {
 
 app.delete('/api/providers/:id', requireControlRequest, async (req, res) => {
   try {
-    const r = await postgresPool.query('DELETE FROM market_providers WHERE id = $1 RETURNING name', [req.params.id]);
+    const r = await postgresPool.query(`DELETE FROM market_providers WHERE id = $1 RETURNING ${PROVIDER_COLUMNS}`, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ success: false, error: 'Provider not found' });
+    await audit(req, 'delete', 'provider', r.rows[0].id, r.rows[0], null);
     candleCache.clear();
     res.json({ success: true, message: `${r.rows[0].name} removed; its instruments have no provider now.` });
   } catch (err) {
@@ -422,6 +451,7 @@ app.post('/api/trading/pairs', requireControlRequest, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING symbol`,
       [i.symbol, i.name, i.category, i.base_asset, i.quote_asset, i.exchange, i.contract_address, i.network, i.provider_id, i.provider_symbol, i.is_active, i.category === 'DEX' ? 'DEX' : 'CEX']
     );
+    await audit(req, 'create', 'instrument', i.symbol, null, i);
     scheduleTickerRefresh(2000);
     res.json({ success: true, symbol: r.rows[0].symbol });
   } catch (err) {
@@ -440,6 +470,7 @@ app.put('/api/trading/pairs/:symbol', requireControlRequest, async (req, res) =>
        WHERE symbol = $1`,
       [i.symbol, i.name, i.category, i.base_asset, i.quote_asset, i.exchange, i.contract_address, i.network, i.provider_id, i.provider_symbol, i.is_active]
     );
+    await audit(req, 'update', 'instrument', i.symbol, found.inst, i);
     for (const key of candleCache.keys()) if (key.startsWith(`${i.symbol}|`)) candleCache.delete(key);
     scheduleTickerRefresh(2000);
     res.json({ success: true, symbol: i.symbol });
@@ -816,11 +847,13 @@ app.get('/api/trading/export/trades', async (req, res) => {
 });
 
 // Server-sent events: new lines of the web3 supervisor log.
+const logStreams = new Set();
 app.get('/api/trading/logs/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  logStreams.add(res);
   send({ type: 'connected', message: `Streaming ${SUPERVISOR_LOG_PATH}` });
 
   let position = null;
@@ -856,7 +889,10 @@ app.get('/api/trading/logs/stream', (req, res) => {
   };
   tick();
   const interval = setInterval(tick, 2000);
-  req.on('close', () => clearInterval(interval));
+  req.on('close', () => {
+    clearInterval(interval);
+    logStreams.delete(res);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1057,6 +1093,52 @@ async function getHeartbeatEngines() {
 }
 
 // A cross-site page can send neither the custom header nor a matching Origin (CSRF guard).
+// Who is calling: Caddy passes the tailnet client address in X-Forwarded-For, and
+// `tailscale whois` maps it to the Tailscale login and device. Cached for 5 minutes.
+const whoisCache = new Map();
+const TAILNET_IP = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/;
+
+function clientIp(req) {
+  return String(req.get('X-Forwarded-For') || req.ip || '').split(',')[0].trim().replace(/^::ffff:/, '');
+}
+
+function tailscaleWhois(ip) {
+  const hit = whoisCache.get(ip);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return Promise.resolve(hit.who);
+  return new Promise((resolve) => {
+    execFile('tailscale', ['whois', '--json', ip], { timeout: 3000 }, (error, stdout) => {
+      let who = null;
+      if (!error) {
+        try {
+          const d = JSON.parse(stdout);
+          const login = d.UserProfile && d.UserProfile.LoginName;
+          const node = d.Node && (d.Node.ComputedName || String(d.Node.Name || '').split('.')[0]);
+          if (login) who = node ? `${login} (${node}, ${ip})` : `${login} (${ip})`;
+        } catch (e) {}
+      }
+      whoisCache.set(ip, { at: Date.now(), who });
+      resolve(who);
+    });
+  });
+}
+
+async function resolveActor(req) {
+  const ip = clientIp(req);
+  const who = TAILNET_IP.test(ip) ? await tailscaleWhois(ip) : null;
+  return who || `unknown (${ip || 'no address'})`;
+}
+
+async function audit(req, action, entity, entityId, before, after) {
+  try {
+    await postgresPool.query(
+      'INSERT INTO suite_audit_log (actor, action, entity, entity_id, before, after) VALUES ($1, $2, $3, $4, $5, $6)',
+      [controlActor(req), action, entity, entityId === null || entityId === undefined ? null : String(entityId), before, after]
+    );
+  } catch (e) {
+    console.error(`[audit] ${action} ${entity} ${entityId} by ${controlActor(req)} not stored: ${e.message}`);
+  }
+}
+
 function requireControlRequest(req, res, next) {
   if (req.get('X-Trading-Control') !== '1') {
     return res.status(403).json({ success: false, error: 'Missing X-Trading-Control header' });
@@ -1071,11 +1153,15 @@ function requireControlRequest(req, res, next) {
       return res.status(403).json({ success: false, error: 'Cross-origin control request rejected' });
     }
   }
-  next();
+  resolveActor(req).then((actor) => {
+    req.actor = actor;
+    console.log(`[control] ${req.method} ${req.path} by ${actor}`);
+    next();
+  });
 }
 
 function controlActor(req) {
-  return `trading-suite UI (${req.get('X-Forwarded-For') || req.ip})`;
+  return `trading-suite UI: ${req.actor || `unknown (${clientIp(req)})`}`;
 }
 
 async function writeControlState(halted, reason, changedBy) {
@@ -1175,9 +1261,39 @@ setInterval(async () => {
   } catch (e) {}
 }, 30000);
 
+let server = null;
+let shuttingDown = false;
+
+// SIGTERM (systemctl stop/restart, deploy): stop taking requests, close log streams,
+// let running requests finish, close the DB pool. Forced exit after 10 s.
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal}: closing`);
+  setTimeout(() => {
+    console.error('[shutdown] timed out after 10 s; exiting');
+    process.exit(1);
+  }, 10000).unref();
+  for (const res of logStreams) res.end();
+  const closeServer = server ? new Promise((resolve) => server.close(resolve)) : Promise.resolve();
+  closeServer
+    .then(() => postgresPool.end())
+    .then(() => {
+      console.log('[shutdown] done');
+      process.exit(0);
+    })
+    .catch((e) => {
+      console.error('[shutdown] error:', e.message);
+      process.exit(1);
+    });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 loadSettings().finally(() => {
   scheduleTickerRefresh(3000);
-  app.listen(PORT, HOST, () => {
+  server = app.listen(PORT, HOST, () => {
     console.log(`Unified Trading Suite running on http://${HOST}:${PORT}`);
   });
+  server.keepAliveTimeout = 5000;
 });

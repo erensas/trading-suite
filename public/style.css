@@ -1,22 +1,4 @@
-:root {
-  --bg: #020617;
-  --panel: #0f172a;
-  --panel-2: #0b1120;
-  --line: #1e293b;
-  --line-2: #334155;
-  --text: #f8fafc;
-  --text-2: #cbd5e1;
-  --muted: #94a3b8;
-  --faint: #64748b;
-  --accent: #38bdf8;
-  --pos: #34d399;
-  --neg: #fb7185;
-  --warn: #fbbf24;
-  --purple: #c084fc;
-  --font-ui: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
-}
-
+/* Colours, radii and fonts: tokens.css (shared with system-dashboard). */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { background: var(--bg); }
 body { font-family: var(--font-ui); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; font-size: 13px; }
@@ -138,11 +120,11 @@ td.empty { text-align: center; color: var(--faint); padding: 20px; }
 /* Pills */
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 700; border: 1px solid; text-decoration: none; cursor: default; background: transparent; }
 button.pill, a.pill { cursor: pointer; }
-.pill-green { background: rgba(16, 185, 129, 0.15); color: var(--pos); border-color: rgba(16, 185, 129, 0.3); }
-.pill-blue { background: rgba(56, 189, 248, 0.15); color: var(--accent); border-color: rgba(56, 189, 248, 0.3); }
-.pill-red { background: rgba(244, 63, 94, 0.15); color: var(--neg); border-color: rgba(244, 63, 94, 0.3); }
-.pill-purple { background: rgba(139, 92, 246, 0.15); color: var(--purple); border-color: rgba(139, 92, 246, 0.3); }
-.pill-warn { background: rgba(251, 191, 36, 0.12); color: var(--warn); border-color: rgba(251, 191, 36, 0.35); }
+.pill-green { background: var(--tint-pos); color: var(--pos); border-color: var(--edge-pos); }
+.pill-blue { background: var(--tint-accent); color: var(--accent); border-color: var(--edge-accent); }
+.pill-red { background: var(--tint-neg); color: var(--neg); border-color: var(--edge-neg); }
+.pill-purple { background: var(--tint-purple); color: var(--purple); border-color: var(--edge-purple); }
+.pill-warn { background: var(--tint-warn); color: var(--warn); border-color: var(--edge-warn); }
 .pill-gray { background: var(--bg); color: var(--muted); border-color: var(--line-2); }
 
 /* Markets layout */

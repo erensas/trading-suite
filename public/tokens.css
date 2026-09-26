@@ -1,0 +1,48 @@
+/* Design tokens shared by trading-suite and system-dashboard.
+ * The same file is public/tokens.css in both repositories; change both together so the
+ * two dashboards (the system dashboard is embedded in the trading-suite shell) match. */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces and lines */
+  --bg: #020617;
+  --panel: #0f172a;
+  --panel-2: #0b1120;
+  --line: #1e293b;
+  --line-2: #334155;
+
+  /* Text */
+  --text: #f8fafc;
+  --text-2: #cbd5e1;
+  --muted: #94a3b8;
+  --faint: #64748b;
+
+  /* Meaning */
+  --accent: #38bdf8;
+  --accent-strong: #0284c7;
+  --pos: #34d399;
+  --neg: #fb7185;
+  --warn: #fbbf24;
+  --purple: #c084fc;
+
+  /* Tinted backgrounds and borders for pills and badges */
+  --tint-accent: rgba(56, 189, 248, 0.15);
+  --edge-accent: rgba(56, 189, 248, 0.3);
+  --tint-pos: rgba(16, 185, 129, 0.15);
+  --edge-pos: rgba(16, 185, 129, 0.3);
+  --tint-neg: rgba(244, 63, 94, 0.15);
+  --edge-neg: rgba(244, 63, 94, 0.3);
+  --tint-warn: rgba(251, 191, 36, 0.12);
+  --edge-warn: rgba(251, 191, 36, 0.35);
+  --tint-purple: rgba(139, 92, 246, 0.15);
+  --edge-purple: rgba(139, 92, 246, 0.3);
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 14px;
+
+  /* Type */
+  --font-ui: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+}

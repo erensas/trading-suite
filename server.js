@@ -310,41 +310,78 @@ app.get('/api/trading/chart-markers', async (req, res) => {
       });
     });
 
-    // Fetch from Persistent Freqtrade SQLite Handle
-    const db = getFreqtradeDbHandle();
-    if (db) {
-      try {
-        const fTrades = db.prepare('SELECT id, pair, open_rate, close_rate, open_date, close_date, realized_profit, is_open FROM trades ORDER BY id DESC LIMIT 50').all();
-        
-        fTrades.forEach(ft => {
-          if (symbol.replace('/', '').includes(ft.pair.replace('/', '')) || ft.pair === 'ETH/USDT' || ft.pair === 'BTC/USDT') {
-            const openTime = Math.floor(new Date(ft.open_date).getTime() / 1000);
+    // Fetch from Postgres trades table first (Freqtrade DB), fallback to SQLite
+    try {
+      const pgFTrades = await postgresPool.query(`
+        SELECT id, pair, open_rate, close_rate, open_date, close_date, realized_profit, is_open 
+        FROM trades ORDER BY id DESC LIMIT 50;
+      `);
+      pgFTrades.rows.forEach(ft => {
+        const isOpen = ft.is_open === true || ft.is_open === 1;
+        if (symbol.replace('/', '').includes((ft.pair || '').replace('/', '')) || ft.pair === 'ETH/USDT' || ft.pair === 'BTC/USDT' || ft.pair === 'SOL/USDT' || ft.pair === 'XRP/USDT') {
+          const openTime = Math.floor(new Date(ft.open_date).getTime() / 1000);
+          markers.push({
+            id: `ft_open_${ft.id}`,
+            time: openTime,
+            position: 'belowBar',
+            color: '#3b82f6',
+            shape: 'arrowUp',
+            text: `FT OPEN @ $${ft.open_rate}`,
+            size: 2
+          });
+
+          if (!isOpen && ft.close_date) {
+            const closeTime = Math.floor(new Date(ft.close_date).getTime() / 1000);
+            const pnl = parseFloat(ft.realized_profit || 0).toFixed(2);
             markers.push({
-              id: `ft_open_${ft.id}`,
-              time: openTime,
-              position: 'belowBar',
-              color: '#3b82f6',
-              shape: 'arrowUp',
-              text: `FT OPEN @ $${ft.open_rate}`,
+              id: `ft_close_${ft.id}`,
+              time: closeTime,
+              position: 'aboveBar',
+              color: parseFloat(pnl) >= 0 ? '#10b981' : '#f43f5e',
+              shape: 'arrowDown',
+              text: `FT CLOSE @ $${ft.close_rate} [PnL: $${pnl}]`,
               size: 2
             });
-
-            if (!ft.is_open && ft.close_date) {
-              const closeTime = Math.floor(new Date(ft.close_date).getTime() / 1000);
-              const pnl = parseFloat(ft.realized_profit || 0).toFixed(2);
+          }
+        }
+      });
+    } catch (pgErr) {
+      // Fallback to Persistent Freqtrade SQLite Handle
+      const db = getFreqtradeDbHandle();
+      if (db) {
+        try {
+          const fTrades = db.prepare('SELECT id, pair, open_rate, close_rate, open_date, close_date, realized_profit, is_open FROM trades ORDER BY id DESC LIMIT 50').all();
+          
+          fTrades.forEach(ft => {
+            if (symbol.replace('/', '').includes(ft.pair.replace('/', '')) || ft.pair === 'ETH/USDT' || ft.pair === 'BTC/USDT') {
+              const openTime = Math.floor(new Date(ft.open_date).getTime() / 1000);
               markers.push({
-                id: `ft_close_${ft.id}`,
-                time: closeTime,
-                position: 'aboveBar',
-                color: parseFloat(pnl) >= 0 ? '#10b981' : '#f43f5e',
-                shape: 'arrowDown',
-                text: `FT CLOSE @ $${ft.close_rate} [PnL: $${pnl}]`,
+                id: `ft_open_${ft.id}`,
+                time: openTime,
+                position: 'belowBar',
+                color: '#3b82f6',
+                shape: 'arrowUp',
+                text: `FT OPEN @ $${ft.open_rate}`,
                 size: 2
               });
+
+              if (!ft.is_open && ft.close_date) {
+                const closeTime = Math.floor(new Date(ft.close_date).getTime() / 1000);
+                const pnl = parseFloat(ft.realized_profit || 0).toFixed(2);
+                markers.push({
+                  id: `ft_close_${ft.id}`,
+                  time: closeTime,
+                  position: 'aboveBar',
+                  color: parseFloat(pnl) >= 0 ? '#10b981' : '#f43f5e',
+                  shape: 'arrowDown',
+                  text: `FT CLOSE @ $${ft.close_rate} [PnL: $${pnl}]`,
+                  size: 2
+                });
+              }
             }
-          }
-        });
-      } catch(e) {}
+          });
+        } catch(e) {}
+      }
     }
 
     // Fetch Manual/Test Orders
@@ -457,15 +494,24 @@ app.get('/api/trading/overview', async (req, res) => {
     let closedTradesCount = 0;
     let freqPnl = 0;
 
-    const db = getFreqtradeDbHandle();
-    if (db) {
-      try {
-        const openRes = db.prepare('SELECT count(*) as cnt FROM trades WHERE is_open = 1').get();
-        const closedRes = db.prepare('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl FROM trades WHERE is_open = 0').get();
-        openTradesCount = openRes ? openRes.cnt : 0;
-        closedTradesCount = closedRes ? closedRes.cnt : 0;
-        freqPnl = closedRes ? parseFloat(closedRes.pnl || 0) : 0;
-      } catch(e) {}
+    // Fetch Freqtrade statistics from Postgres trade_db first, fallback to SQLite
+    try {
+      const pgOpen = await postgresPool.query('SELECT count(*) as cnt FROM trades WHERE is_open = true;');
+      const pgClosed = await postgresPool.query('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl FROM trades WHERE is_open = false;');
+      openTradesCount = parseInt(pgOpen.rows[0].cnt || 0, 10);
+      closedTradesCount = parseInt(pgClosed.rows[0].cnt || 0, 10);
+      freqPnl = parseFloat(pgClosed.rows[0].pnl || 0);
+    } catch (pgErr) {
+      const db = getFreqtradeDbHandle();
+      if (db) {
+        try {
+          const openRes = db.prepare('SELECT count(*) as cnt FROM trades WHERE is_open = 1').get();
+          const closedRes = db.prepare('SELECT count(*) as cnt, COALESCE(sum(realized_profit), 0) as pnl FROM trades WHERE is_open = 0').get();
+          openTradesCount = openRes ? openRes.cnt : 0;
+          closedTradesCount = closedRes ? closedRes.cnt : 0;
+          freqPnl = closedRes ? parseFloat(closedRes.pnl || 0) : 0;
+        } catch(e) {}
+      }
     }
 
     const totalPnlUsd = (parseFloat(dexStats.net_pnl || 0) + freqPnl).toFixed(2);

@@ -692,6 +692,8 @@ function initLogStream() {
   source.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
+      // Every (re)connect resends the tail of the file, so start from a clean view.
+      if (msg.type === 'connected') box.innerHTML = '';
       const line = document.createElement('div');
       line.textContent = msg.type === 'log' ? msg.log : `# ${msg.message}`;
       box.appendChild(line);

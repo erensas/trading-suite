@@ -839,6 +839,7 @@ app.get('/api/trading/logs/stream', (req, res) => {
   send({ type: 'connected', message: `Streaming ${SUPERVISOR_LOG_PATH}` });
 
   let position = null;
+  let first = true;
   const tick = () => {
     try {
       const { size } = fs.statSync(SUPERVISOR_LOG_PATH);
@@ -849,10 +850,22 @@ app.get('/api/trading/logs/stream', (req, res) => {
       const buffer = Buffer.alloc(length);
       fs.readSync(fd, buffer, 0, length, position);
       fs.closeSync(fd);
-      const text = buffer.toString('utf8');
+      let text = buffer.toString('utf8');
+      let skipped = 0;
+      if (first && position > 0) {
+        // The initial tail starts mid-file: drop the partial first line.
+        const nl = text.indexOf('\n');
+        if (nl < 0) return;
+        skipped = Buffer.byteLength(text.slice(0, nl + 1));
+        text = text.slice(nl + 1);
+      }
+      first = false;
       const lastNewline = text.lastIndexOf('\n');
-      if (lastNewline < 0) return;
-      position += Buffer.byteLength(text.slice(0, lastNewline + 1));
+      if (lastNewline < 0) {
+        position += skipped;
+        return;
+      }
+      position += skipped + Buffer.byteLength(text.slice(0, lastNewline + 1));
       text.slice(0, lastNewline).split('\n').filter(Boolean).forEach((log) => send({ type: 'log', log }));
     } catch (e) {}
   };

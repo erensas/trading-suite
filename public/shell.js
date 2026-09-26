@@ -7,6 +7,14 @@ const ENGINE_LABELS = { freqtrade: 'Freqtrade', 'web3-dex-bot': 'Web3 DEX' };
 const MODE_LABELS = { DRY_RUN: 'DRY-RUN', LIVE: 'LIVE', UNKNOWN: '?' };
 const SHELL_VIEWS = ['trading', 'system', 'frequi'];
 
+// FreqUI loads /assets/ from its root, so Caddy serves it on its own port
+// (8443 over https, 8181 over http) instead of under a path prefix.
+function resolveFrameSrc(src) {
+  if (src !== '@frequi') return src;
+  const port = window.location.protocol === 'https:' ? 8443 : 8181;
+  return `${window.location.protocol}//${window.location.hostname}:${port}/`;
+}
+
 let controlState = null;
 let modalMode = null;
 
@@ -144,7 +152,7 @@ function switchView(view) {
 
   // Embedded dashboards load on first visit only.
   const frame = document.querySelector(`#view-${view} iframe[data-src]`);
-  if (frame && !frame.getAttribute('src')) frame.setAttribute('src', frame.dataset.src);
+  if (frame && !frame.getAttribute('src')) frame.setAttribute('src', resolveFrameSrc(frame.dataset.src));
 
   history.replaceState(null, '', view === 'trading' ? location.pathname : `#${view}`);
 

@@ -17,6 +17,59 @@ app.get(['/health', '/api/health'], (req, res) => {
   res.json({ status: 'ok', service: 'trading-suite', timestamp: new Date().toISOString() });
 });
 
+app.get(['/metrics', '/api/metrics'], async (req, res) => {
+  try {
+    const mem = process.memoryUsage();
+    let dbStatus = 'ok';
+    let totalLogs = 0;
+    
+    try {
+      const dbRes = await postgresPool.query('SELECT count(*) FROM trade_logs');
+      totalLogs = parseInt(dbRes.rows[0].count, 10);
+    } catch (e) {
+      dbStatus = 'error: ' + e.message;
+    }
+
+    const metricsData = {
+      status: 'ok',
+      service: 'trading-suite',
+      timestamp: new Date().toISOString(),
+      uptime_seconds: Math.floor(process.uptime()),
+      memory: {
+        rss_bytes: mem.rss,
+        heapTotal_bytes: mem.heapTotal,
+        heapUsed_bytes: mem.heapUsed,
+        external_bytes: mem.external
+      },
+      database: {
+        status: dbStatus,
+        total_trade_logs: totalLogs,
+        pool_total_count: postgresPool.totalCount,
+        pool_idle_count: postgresPool.idleCount,
+        pool_waiting_count: postgresPool.waitingCount
+      },
+      dynamic_settings: dynamicSettings,
+      multi_asset_cache_status: multiAssetCache.status || 'unknown'
+    };
+
+    if (req.headers.accept && req.headers.accept.includes('text/plain')) {
+      let prometheusFormat = `# HELP trading_suite_uptime_seconds Process uptime in seconds\n`;
+      prometheusFormat += `# TYPE trading_suite_uptime_seconds counter\n`;
+      prometheusFormat += `trading_suite_uptime_seconds ${metricsData.uptime_seconds}\n`;
+      prometheusFormat += `# HELP trading_suite_memory_rss_bytes Memory RSS in bytes\n`;
+      prometheusFormat += `trading_suite_memory_rss_bytes ${mem.rss}\n`;
+      prometheusFormat += `# HELP trading_suite_trade_logs_total Total trade logs count\n`;
+      prometheusFormat += `trading_suite_trade_logs_total ${totalLogs}\n`;
+      res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+      return res.send(prometheusFormat);
+    }
+
+    res.json(metricsData);
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
 // PostgreSQL Pool for Dedicated Trade Database
 const postgresPool = new Pool({
   database: process.env.PG_MAIN_DB || 'trade_db',
@@ -74,9 +127,9 @@ function refreshMultiAssetData() {
   });
 }
 
-// Initial fetch and 15-second background refresh timer
+// Initial fetch and 30-second background refresh timer
 refreshMultiAssetData();
-setInterval(refreshMultiAssetData, 15000);
+setInterval(refreshMultiAssetData, 30000);
 
 // Helper for HTTP requests
 function fetchJson(url) {
@@ -470,6 +523,107 @@ app.get('/api/trading/logs/stream', (req, res) => {
   req.on('close', () => {
     clearInterval(interval);
   });
+});
+
+// 13. API: Export Trades Data (CSV / JSON)
+app.get('/api/trading/export/trades', async (req, res) => {
+  try {
+    const format = req.query.format || 'json';
+    const limit = parseInt(req.query.limit || '500', 10);
+    const dbRes = await postgresPool.query('SELECT * FROM trade_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+    const rows = dbRes.rows;
+
+    if (format === 'csv') {
+      if (rows.length === 0) {
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="trade_logs.csv"');
+        return res.send('id,module,symbol,action,price,amount,pnl_usd,created_at\n');
+      }
+      const headers = Object.keys(rows[0]).join(',');
+      const csvRows = rows.map(r => Object.values(r).map(v => typeof v === 'string' ? `"${v.replace(/"/g, '""')}"` : (v === null ? '' : v)).join(','));
+      const csvContent = [headers, ...csvRows].join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="trade_logs_${Date.now()}.csv"`);
+      return res.send(csvContent);
+    } else {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="trade_logs_${Date.now()}.json"`);
+      return res.json({ success: true, count: rows.length, data: rows });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 14. API: Orderbook Depth Proxy
+app.get('/api/trading/orderbook', async (req, res) => {
+  const symbol = (req.query.symbol || 'ETH/USDT').replace('/', '').replace('WBTC', 'BTC');
+  try {
+    const binanceUrl = `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=8`;
+    const reqBinance = https.get(binanceUrl, (bRes) => {
+      let body = '';
+      bRes.on('data', chunk => body += chunk);
+      bRes.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed.bids && parsed.asks) {
+            return res.json({ success: true, symbol, bids: parsed.bids, asks: parsed.asks });
+          }
+          throw new Error('Invalid depth payload');
+        } catch (e) {
+          generateFallbackDepth(symbol, res);
+        }
+      });
+    });
+    reqBinance.on('error', () => generateFallbackDepth(symbol, res));
+    reqBinance.setTimeout(3000, () => {
+      reqBinance.destroy();
+      generateFallbackDepth(symbol, res);
+    });
+  } catch (err) {
+    generateFallbackDepth(symbol, res);
+  }
+});
+
+function generateFallbackDepth(symbol, res) {
+  const basePrice = symbol.includes('ETH') ? 2600 : symbol.includes('BTC') ? 65000 : 100;
+  const bids = [];
+  const asks = [];
+  for (let i = 1; i <= 8; i++) {
+    bids.push([(basePrice * (1 - i * 0.001)).toFixed(2), (Math.random() * 5 + 0.5).toFixed(4)]);
+    asks.push([(basePrice * (1 + i * 0.001)).toFixed(2), (Math.random() * 5 + 0.5).toFixed(4)]);
+  }
+  res.json({ success: true, symbol, bids, asks, simulated: true });
+}
+
+// 15. API: Get Web3 DEX Flashloan Arbitrage Executions
+app.get('/api/trading/dex-arbitrage', async (req, res) => {
+  try {
+    const dbRes = await postgresPool.query(`
+      SELECT id, created_at, action, amount_in, amount_out, gas_used, status,
+             (CAST(amount_out AS NUMERIC) - CAST(amount_in AS NUMERIC)) as pnl_usd
+      FROM trade_logs 
+      ORDER BY created_at DESC LIMIT 50;
+    `);
+    res.json({ success: true, count: dbRes.rows.length, trades: dbRes.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 16. API: Get Freqtrade Trades & Positions
+app.get('/api/trading/freqtrade', async (req, res) => {
+  try {
+    const dbRes = await postgresPool.query(`
+      SELECT id, pair, open_rate, close_rate, stake_amount, open_date, close_date,
+             realized_profit, close_profit_abs, is_open, strategy, enter_tag, exit_reason
+      FROM trades 
+      ORDER BY open_date DESC LIMIT 50;
+    `);
+    res.json({ success: true, count: dbRes.rows.length, trades: dbRes.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.listen(PORT, HOST, () => {

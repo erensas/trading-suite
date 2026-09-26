@@ -2,7 +2,22 @@ let chart = null;
 let candlestickSeries = null;
 let activeSymbol = 'ETH/USDT';
 let activeCategory = 'DEX';
+let activeTimeframe = '1m';
+let activeCategoryFilter = 'ALL';
 let allPairs = [];
+let rawCandleData = [];
+
+// Indicator Series
+let indicatorSeries = {
+  sma20: null,
+  sma50: null,
+  ema200: null
+};
+let indicatorStates = {
+  sma20: false,
+  sma50: false,
+  ema200: false
+};
 
 // Initialize Dashboard on Load
 document.addEventListener('DOMContentLoaded', () => {
@@ -12,14 +27,24 @@ document.addEventListener('DOMContentLoaded', () => {
   loadChartMarkers(activeSymbol);
   loadEconomistAdvice(activeSymbol);
   loadNews(activeSymbol);
+  loadOrderbook(activeSymbol);
+  loadDexTrades();
+  loadFreqtradeTrades();
   loadMultiAssetData();
   initSSELogStream();
+  calculatePnL();
 
-  // Refresh interval every 15s
+  // Refresh intervals
   setInterval(() => {
     loadOverview();
     loadChartMarkers(activeSymbol);
   }, 15000);
+
+  setInterval(() => {
+    loadOrderbook(activeSymbol);
+    loadDexTrades();
+    loadFreqtradeTrades();
+  }, 5000);
 });
 
 // Initialize TradingView Lightweight Chart
@@ -63,26 +88,40 @@ function initChart() {
     wickUpColor: '#10b981',
   });
 
-  fetchCandlesAndRender(activeSymbol);
+  fetchCandlesAndRender(activeSymbol, activeTimeframe);
 
   window.addEventListener('resize', () => {
     chart.applyOptions({ width: container.clientWidth });
   });
 }
 
-// Fetch Candlestick Data from Binance Free API or Fallback Simulation
-async function fetchCandlesAndRender(symbol) {
+// Timeframe Selector
+function changeTimeframe(tf, btnElement) {
+  activeTimeframe = tf;
+  document.querySelectorAll('.tf-btn-group .tf-btn').forEach(b => {
+    if (b.innerText.includes('m') || b.innerText.includes('h') || b.innerText.includes('d')) {
+      b.classList.remove('active');
+    }
+  });
+  if (btnElement) btnElement.classList.add('active');
+
+  fetchCandlesAndRender(activeSymbol, activeTimeframe);
+  showToast('Zaman Dilimi Değiştirildi', `${activeSymbol} - ${tf} grafik yükleniyor.`, 'info');
+}
+
+// Fetch Candlestick Data from Binance API or Fallback
+async function fetchCandlesAndRender(symbol, interval = '1m') {
   let binanceSymbol = symbol.replace('/', '').replace('WBTC', 'BTC');
   if (symbol === 'SPY' || symbol === 'QQQ' || symbol === 'NVDA' || symbol === 'AAPL') {
-    binanceSymbol = 'BTCUSDT'; // Use BTC price action as chart baseline for equities in paper mode
+    binanceSymbol = 'BTCUSDT';
   }
 
   try {
-    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=150`);
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${interval}&limit=200`);
     const data = await res.json();
 
     if (Array.isArray(data)) {
-      const candles = data.map(d => ({
+      rawCandleData = data.map(d => ({
         time: Math.floor(d[0] / 1000),
         open: parseFloat(d[1]),
         high: parseFloat(d[2]),
@@ -90,7 +129,10 @@ async function fetchCandlesAndRender(symbol) {
         close: parseFloat(d[4])
       }));
 
-      candlestickSeries.setData(candles);
+      candlestickSeries.setData(rawCandleData);
+      renderIndicators();
+    } else {
+      generateSimulatedCandles();
     }
   } catch (err) {
     console.warn('Binance candles fallback:', err.message);
@@ -100,7 +142,7 @@ async function fetchCandlesAndRender(symbol) {
 
 function generateSimulatedCandles() {
   const candles = [];
-  let basePrice = activeSymbol.includes('ETH') ? 3450 : (activeSymbol.includes('BTC') ? 91200 : 100);
+  let basePrice = activeSymbol.includes('ETH') ? 2600 : (activeSymbol.includes('BTC') ? 65000 : 100);
   let now = Math.floor(Date.now() / 1000) - 150 * 60;
 
   for (let i = 0; i < 150; i++) {
@@ -112,7 +154,92 @@ function generateSimulatedCandles() {
 
     candles.push({ time: now + i * 60, open, high, low, close });
   }
+  rawCandleData = candles;
   candlestickSeries.setData(candles);
+  renderIndicators();
+}
+
+// Indicator Toggle Logic
+function toggleIndicator(type) {
+  indicatorStates[type] = !indicatorStates[type];
+  const btn = document.getElementById(`btn-${type}`);
+  if (btn) {
+    if (indicatorStates[type]) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  }
+  renderIndicators();
+}
+
+function renderIndicators() {
+  if (!rawCandleData || rawCandleData.length === 0) return;
+
+  // SMA 20
+  if (indicatorStates.sma20) {
+    if (!indicatorSeries.sma20) {
+      indicatorSeries.sma20 = chart.addLineSeries({ color: '#38bdf8', lineWidth: 2, title: 'SMA 20' });
+    }
+    indicatorSeries.sma20.setData(calculateSMA(rawCandleData, 20));
+  } else if (indicatorSeries.sma20) {
+    chart.removeSeries(indicatorSeries.sma20);
+    indicatorSeries.sma20 = null;
+  }
+
+  // SMA 50
+  if (indicatorStates.sma50) {
+    if (!indicatorSeries.sma50) {
+      indicatorSeries.sma50 = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, title: 'SMA 50' });
+    }
+    indicatorSeries.sma50.setData(calculateSMA(rawCandleData, 50));
+  } else if (indicatorSeries.sma50) {
+    chart.removeSeries(indicatorSeries.sma50);
+    indicatorSeries.sma50 = null;
+  }
+
+  // EMA 200
+  if (indicatorStates.ema200) {
+    if (!indicatorSeries.ema200) {
+      indicatorSeries.ema200 = chart.addLineSeries({ color: '#a855f7', lineWidth: 2, title: 'EMA 200' });
+    }
+    indicatorSeries.ema200.setData(calculateEMA(rawCandleData, 200));
+  } else if (indicatorSeries.ema200) {
+    chart.removeSeries(indicatorSeries.ema200);
+    indicatorSeries.ema200 = null;
+  }
+}
+
+function calculateSMA(candles, period) {
+  const result = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i < period - 1) continue;
+    let sum = 0;
+    for (let j = 0; j < period; j++) {
+      sum += candles[i - j].close;
+    }
+    result.push({ time: candles[i].time, value: sum / period });
+  }
+  return result;
+}
+
+function calculateEMA(candles, period) {
+  const result = [];
+  const k = 2 / (period + 1);
+  let ema = candles[0] ? candles[0].close : 0;
+
+  for (let i = 0; i < candles.length; i++) {
+    const close = candles[i].close;
+    if (i === 0) {
+      ema = close;
+    } else {
+      ema = close * k + ema * (1 - k);
+    }
+    if (i >= period - 1) {
+      result.push({ time: candles[i].time, value: ema });
+    }
+  }
+  return result;
 }
 
 // Load DB Chart Overlays / Markers
@@ -127,6 +254,63 @@ async function loadChartMarkers(symbol) {
   } catch (err) {
     console.error('Error loading markers:', err);
   }
+}
+
+// Load Orderbook Depth Data
+async function loadOrderbook(symbol) {
+  try {
+    const res = await fetch(`/api/trading/orderbook?symbol=${encodeURIComponent(symbol)}`);
+    const data = await res.json();
+
+    const pill = document.getElementById('ob-symbol-pill');
+    if (pill) pill.innerText = symbol;
+
+    if (data.success) {
+      renderOrderbook(data.bids || [], data.asks || []);
+    }
+  } catch (err) {}
+}
+
+function renderOrderbook(bids, asks) {
+  const bidsContainer = document.getElementById('ob-bids-container');
+  const asksContainer = document.getElementById('ob-asks-container');
+  const midPrice = document.getElementById('ob-mid-price');
+
+  if (!bidsContainer || !asksContainer) return;
+
+  const topAsk = asks[0] ? parseFloat(asks[0][0]) : 0;
+  const topBid = bids[0] ? parseFloat(bids[0][0]) : 0;
+  if (topAsk && topBid && midPrice) {
+    midPrice.innerText = `$${((topAsk + topBid) / 2).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  }
+
+  asksContainer.innerHTML = asks.slice(0, 5).map(a => {
+    const price = parseFloat(a[0]).toFixed(2);
+    const amount = parseFloat(a[1]).toFixed(4);
+    const total = (price * amount).toFixed(2);
+    return `
+      <div class="ob-row">
+        <div class="ob-bar-ask" style="width: ${Math.min(amount * 10, 100)}%;"></div>
+        <span class="ob-ask" style="z-index: 1;">$${price}</span>
+        <span style="text-align: right; z-index: 1;">${amount}</span>
+        <span style="text-align: right; z-index: 1; color: #94a3b8;">$${total}</span>
+      </div>
+    `;
+  }).join('');
+
+  bidsContainer.innerHTML = bids.slice(0, 5).map(b => {
+    const price = parseFloat(b[0]).toFixed(2);
+    const amount = parseFloat(b[1]).toFixed(4);
+    const total = (price * amount).toFixed(2);
+    return `
+      <div class="ob-row">
+        <div class="ob-bar-bid" style="width: ${Math.min(amount * 10, 100)}%;"></div>
+        <span class="ob-bid" style="z-index: 1;">$${price}</span>
+        <span style="text-align: right; z-index: 1;">${amount}</span>
+        <span style="text-align: right; z-index: 1; color: #94a3b8;">$${total}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 // Load All Instruments from Database
@@ -148,47 +332,54 @@ function renderScreener(pairs) {
   const tbody = document.getElementById('screener-tbody');
   if (!tbody) return;
 
+  if (!pairs || pairs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#64748b;">Enstrüman bulunamadı.</td></tr>';
+    return;
+  }
+
   tbody.innerHTML = pairs.map(p => {
     const isPos = parseFloat(p.change_24h_pct || 0) >= 0;
-    const pillClass = p.category === 'DEX' ? 'pill-purple' : (p.category === 'TRADFI' ? 'pill-blue' : 'pill-green');
+    const pillClass = p.category === 'DEX' ? 'pill-purple' : (p.category === 'TRADFI' ? 'pill-blue' : (p.category === 'CEX_FUTURES' ? 'pill-warn' : 'pill-green'));
+
+    const priceFormatted = p.last_price ? '$' + parseFloat(p.last_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : '-';
+    const volFormatted = p.volume_24h_usd ? '$' + (parseFloat(p.volume_24h_usd) / 1000000).toFixed(2) + 'M' : '-';
+    const changeFormatted = p.change_24h_pct !== null && p.change_24h_pct !== undefined ? `${isPos ? '+' : ''}${p.change_24h_pct}%` : '-';
+    const scoreFormatted = p.profit_score ? `${p.profit_score} / 100` : '85.0 / 100';
+    const gradeFormatted = p.score_grade ? ` (${p.score_grade})` : '';
 
     return `
       <tr onclick="selectPair('${p.symbol}', '${p.category}')">
         <td style="font-weight: 700; color: #f8fafc;">${p.symbol}</td>
         <td><span class="pill ${pillClass}">${p.category}</span></td>
         <td>${p.exchange || 'N/A'}</td>
-        <td style="font-family: 'JetBrains Mono', monospace;">$${parseFloat(p.last_price || 0).toLocaleString()}</td>
-        <td style="font-weight: 700; color: ${isPos ? '#34d399' : '#fb7185'};">${isPos ? '+' : ''}${p.change_24h_pct}%</td>
-        <td>$${(parseFloat(p.volume_24h_usd || 0) / 1000000).toFixed(1)}M</td>
-        <td><span class="pill pill-green">${p.profit_score || '85.0'} / 100</span></td>
+        <td style="font-family: 'JetBrains Mono', monospace;">${priceFormatted}</td>
+        <td style="font-weight: 700; color: ${isPos ? '#34d399' : '#fb7185'};">${changeFormatted}</td>
+        <td>${volFormatted}</td>
+        <td><span class="pill pill-green"><i class="fa-solid fa-brain"></i> ${scoreFormatted}${gradeFormatted}</span></td>
         <td><button class="pill pill-blue" style="cursor: pointer;"><i class="fa-solid fa-chart-line"></i> Grafik Aç</button></td>
       </tr>
     `;
   }).join('');
 }
 
-// Select Pair and Synchronize Dashboard Context
-function selectPair(symbol, category) {
-  activeSymbol = symbol;
-  activeCategory = category || 'DEX';
-
-  document.getElementById('active-symbol-title').innerText = symbol;
-  document.getElementById('active-category-pill').innerText = activeCategory;
-  document.getElementById('order-symbol').value = symbol;
-  document.getElementById('econ-symbol').innerText = symbol;
-
-  fetchCandlesAndRender(symbol);
-  loadChartMarkers(symbol);
-  loadEconomistAdvice(symbol);
-  loadNews(symbol);
-
-  switchTab('chart');
+// Category Filter for Screener
+function filterScreenerCat(cat, btnElement) {
+  activeCategoryFilter = cat;
+  if (btnElement && btnElement.parentElement) {
+    btnElement.parentElement.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btnElement.classList.add('active');
+  }
+  filterScreener();
 }
 
 // Filter Market Screener
 function filterScreener() {
-  const query = document.getElementById('screener-search').value.toLowerCase();
-  const filtered = allPairs.filter(p => p.symbol.toLowerCase().includes(query) || p.category.toLowerCase().includes(query));
+  const query = (document.getElementById('screener-search')?.value || '').toLowerCase();
+  const filtered = allPairs.filter(p => {
+    const matchesSearch = p.symbol.toLowerCase().includes(query) || p.category.toLowerCase().includes(query) || (p.exchange && p.exchange.toLowerCase().includes(query));
+    const matchesCat = activeCategoryFilter === 'ALL' || p.category === activeCategoryFilter;
+    return matchesSearch && matchesCat;
+  });
   renderScreener(filtered);
 }
 
@@ -232,6 +423,32 @@ async function loadNews(symbol) {
   } catch (e) {}
 }
 
+// Interactive Risk & PnL Calculator
+function calculatePnL() {
+  const entry = parseFloat(document.getElementById('calc-entry')?.value || 2600);
+  const margin = parseFloat(document.getElementById('calc-margin')?.value || 500);
+  const lev = parseFloat(document.getElementById('calc-leverage')?.value || 5);
+  const sl = parseFloat(document.getElementById('calc-sl')?.value || 2.0);
+  const tp = parseFloat(document.getElementById('calc-tp')?.value || 5.0);
+
+  const positionSize = margin * lev;
+  const tpProfit = positionSize * (tp / 100);
+  const slLoss = positionSize * (sl / 100);
+
+  const tpReturnPct = (tpProfit / margin) * 100;
+  const slLossPct = (slLoss / margin) * 100;
+
+  const rrRatio = slLoss > 0 ? (tpProfit / slLoss).toFixed(2) : '0.00';
+  const liqPrice = entry * (1 - (1 / lev) * 0.9);
+
+  if (document.getElementById('calc-res-tp')) {
+    document.getElementById('calc-res-tp').innerText = `+$${tpProfit.toFixed(2)} (+${tpReturnPct.toFixed(1)}%)`;
+    document.getElementById('calc-res-sl').innerText = `-$${slLoss.toFixed(2)} (-${slLossPct.toFixed(1)}%)`;
+    document.getElementById('calc-res-rr').innerText = `1 : ${rrRatio}`;
+    document.getElementById('calc-res-liq').innerText = `$${liqPrice.toFixed(2)}`;
+  }
+}
+
 // Submit Test Order
 async function submitTestOrder() {
   const symbol = document.getElementById('order-symbol').value;
@@ -247,14 +464,36 @@ async function submitTestOrder() {
     const data = await res.json();
 
     if (data.success) {
-      alert(`✅ Test Emir Başarıyla İletildi!\n${symbol} - ${side} ($${amount})`);
+      showToast('Emir İletildi', `✅ ${symbol} - ${side} ($${amount}) simülasyona aktarıldı.`, 'success');
       loadChartMarkers(symbol);
     } else {
-      alert(`❌ Hata: ${data.error}`);
+      showToast('Emir Hatası', `❌ ${data.error}`, 'error');
     }
   } catch (e) {
-    alert(`❌ Bağlantı Hatası: ${e.message}`);
+    showToast('Bağlantı Hatası', `❌ ${e.message}`, 'error');
   }
+}
+
+// Toast Notifications Component
+function showToast(title, message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast-card toast-${type}`;
+  toast.innerHTML = `
+    <div>
+      <div style="font-weight: 700; margin-bottom: 2px;">${title}</div>
+      <div style="font-size: 12px; color: #cbd5e1;">${message}</div>
+    </div>
+  `;
+
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
 }
 
 // Load Multi-Asset Data
@@ -337,20 +576,108 @@ function clearLogs() {
   document.getElementById('log-console').innerText = '';
 }
 
+// Load Web3 DEX Flashloan Arbitrage Executions from trade_logs
+async function loadDexTrades() {
+  try {
+    const res = await fetch('/api/trading/dex-arbitrage');
+    const data = await res.json();
+
+    const tbody = document.getElementById('dex-tbody');
+    if (!tbody) return;
+
+    if (data.success && data.trades && data.trades.length > 0) {
+      tbody.innerHTML = data.trades.map(t => {
+        const pnl = parseFloat(t.pnl_usd || 0);
+        const pnlColor = pnl >= 0 ? '#34d399' : '#fb7185';
+        return `
+          <tr>
+            <td style="font-weight: 700; font-family: 'JetBrains Mono';">#${t.id}</td>
+            <td>${new Date(t.created_at).toLocaleString('tr-TR')}</td>
+            <td><span class="pill pill-purple">${t.action || 'FLASHLOAN_ARBITRAGE'}</span></td>
+            <td>$${parseFloat(t.amount_in || 0).toLocaleString()}</td>
+            <td>$${parseFloat(t.amount_out || 0).toLocaleString()}</td>
+            <td>${t.gas_used || '0'} Gwei</td>
+            <td style="font-weight: 700; color: ${pnlColor};">+$${pnl.toFixed(4)} USD</td>
+            <td><span class="pill pill-green">${t.status || 'SUCCESS'}</span></td>
+          </tr>
+        `;
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#64748b;">Kayıt bulunamadı.</td></tr>';
+    }
+  } catch (e) {
+    console.error('Error loading DEX trades:', e);
+  }
+}
+
+// Load Freqtrade Spot Trades from trades table
+async function loadFreqtradeTrades() {
+  try {
+    const res = await fetch('/api/trading/freqtrade');
+    const data = await res.json();
+
+    const tbody = document.getElementById('freqtrade-tbody');
+    if (!tbody) return;
+
+    if (data.success && data.trades && data.trades.length > 0) {
+      tbody.innerHTML = data.trades.map(t => {
+        const profit = parseFloat(t.close_profit_abs || t.realized_profit || 0);
+        const profitColor = profit >= 0 ? '#34d399' : '#fb7185';
+        const isOpen = t.is_open;
+        return `
+          <tr>
+            <td style="font-weight: 700; font-family: 'JetBrains Mono';">#${t.id}</td>
+            <td style="font-weight: 700;">${t.pair}</td>
+            <td>$${parseFloat(t.open_rate || 0).toLocaleString()}</td>
+            <td>${t.close_rate ? '$' + parseFloat(t.close_rate).toLocaleString() : '-'}</td>
+            <td>$${parseFloat(t.stake_amount || 0).toFixed(2)} USDT</td>
+            <td>${new Date(t.open_date).toLocaleString('tr-TR')}</td>
+            <td>${t.close_date ? new Date(t.close_date).toLocaleString('tr-TR') : 'AÇIK POS'}</td>
+            <td style="font-weight: 700; color: ${profitColor};">${profit >= 0 ? '+' : ''}$${profit.toFixed(4)} USD</td>
+            <td><span class="pill ${isOpen ? 'pill-blue' : 'pill-green'}">${isOpen ? 'OPEN' : 'CLOSED'}</span></td>
+          </tr>
+        `;
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#64748b;">Kayıt bulunamadı.</td></tr>';
+    }
+  } catch (e) {
+    console.error('Error loading Freqtrade trades:', e);
+  }
+}
+
 // Tab Switching
-function switchTab(tabId) {
+function switchTab(tabId, btnElement = null) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
   const selected = document.getElementById(`tab-${tabId}`);
   if (selected) selected.classList.remove('hidden');
 
-  event.target.classList.add('active');
+  let targetBtn = btnElement;
+  if (!targetBtn && window.event) {
+    const src = window.event.target;
+    targetBtn = src.closest ? src.closest('.tab-btn') : src;
+  }
+  if (!targetBtn) {
+    targetBtn = document.querySelector(`.tab-btn[onclick*="'${tabId}'"]`);
+  }
+  if (targetBtn && targetBtn.classList) {
+    targetBtn.classList.add('active');
+  }
+
+  // Trigger data refreshes on tab change
+  if (tabId === 'screener') loadPairs();
+  if (tabId === 'dex') loadDexTrades();
+  if (tabId === 'freqtrade') loadFreqtradeTrades();
+  if (tabId === 'multiasset') loadMultiAssetData();
 
   if (tabId === 'chart' && chart) {
     setTimeout(() => {
       const container = document.getElementById('chart-wrapper');
-      chart.applyOptions({ width: container.clientWidth });
+      if (container) {
+        chart.applyOptions({ width: container.clientWidth });
+      }
     }, 100);
   }
 }

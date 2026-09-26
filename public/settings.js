@@ -415,7 +415,13 @@
         '<div class="card-title small">Services</div>',
         ...d.services.map((s) => row(s.ok, s.name, s.detail, `${s.ms} ms`)),
         '<div class="card-title small">Data providers</div>',
-        ...d.providers.map((p) => row(p.enabled ? p.ok : null, p.name, p.enabled ? p.detail || 'not tested yet' : 'disabled', `${p.instruments} instr.${p.tested_at ? ' · ' + TS.fmt.ago(p.tested_at) : ''}`)),
+        ...d.providers.map((p) => {
+          const c = p.circuit || {};
+          const paused = p.enabled && c.state && c.state !== 'closed';
+          const detail = !p.enabled ? 'disabled' : paused ? `paused after ${c.failures} failures (${c.lastError || 'errors'})${c.retryInS ? `, retry in ${c.retryInS} s` : ''}` : p.detail || 'not tested yet';
+          const limit = c.ratePerMin ? ` · ${c.ratePerMin}/min` : '';
+          return row(!p.enabled ? null : paused ? false : p.ok, p.name, detail, `${p.instruments} instr.${limit}${p.tested_at ? ' · ' + TS.fmt.ago(p.tested_at) : ''}`);
+        }),
         '<div class="card-title small">Price refresh</div>',
         row(t.lastRunAt ? t.failed === 0 : null, 'Ticker refresh', t.lastRunAt ? `${t.updated} updated, ${t.failed} failed` : 'not run yet', t.lastRunAt ? TS.fmt.ago(t.lastRunAt) : ''),
         ...errs.slice(0, 10).map(([sym, msg]) => row(false, sym, msg, '')),

@@ -1,6 +1,6 @@
 # Trading Suite
 
-Web dashboard for the OpenClaw trading engines (Freqtrade, Web3 DEX bot): market charts per instrument, trade markers, engine status, kill switch, and the settings behind them. Node.js + Express + PostgreSQL (`trade_db`), vanilla JS front end with TradingView Lightweight Charts.
+Web dashboard for the OpenClaw trading engines (Freqtrade, Web3 DEX bot): market charts per instrument, trade markers, engine status, kill switch, and the settings behind them. Node.js 22+ with Express 5 and PostgreSQL (`trade_db`), vanilla JS front end with TradingView Lightweight Charts.
 
 Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on the tailnet at `/trading-suite/`.
 
@@ -55,6 +55,11 @@ Provider base URLs must be public `https` hosts, and template URLs must stay on 
 
 A background job refreshes `last_price`, `change_24h_pct` and `volume_24h_usd` of active instruments on the configured interval (GeckoTerminal at most every 5 minutes, one call every 6.5 s, and a one-minute pause after a 429). When a provider fails, the chart keeps the last good candles and marks them stale.
 
+Every provider call goes through `lib/resilience.js`:
+
+- **Request budget** per provider: 300/min for Binance, OKX and Bybit, 60/min for Yahoo and REST templates (override with `rate_limit_per_min` in the provider's config). A call waits up to 5 s for its turn, then gets a 429. GeckoTerminal keeps its own spacing; Freqtrade is local and has none.
+- **Circuit breaker** per provider: after 5 failures in a row (network error, timeout, HTTP 5xx or 429) the provider is paused for 30 s, then one trial call decides; each failed trial doubles the pause, up to 5 minutes. An unknown symbol or other 4xx does not count. Settings → Integrations shows a paused provider and when it is retried.
+
 ## Security
 
 - Every state-changing call except the simulated test order needs the `X-Trading-Control: 1` header and a same-origin `Origin`. This covers the kill switch, settings, providers and instruments.
@@ -65,18 +70,68 @@ A background job refreshes `last_price`, `change_24h_pct` and `volume_24h_usd` o
 
 ## Database
 
-Apply the migrations in order with `psql -d trade_db -f db/migrations/<file>`:
+Migrations live in `db/migrations/NNN_name.sql` and are applied by `db/migrate.js`, which records them in `schema_migrations` (version, file, checksum, when, by whom):
+
+```bash
+npm run migrate:status          # node db/migrate.js status
+node db/migrate.js check        # exit 3 when something is pending
+npm run migrate                 # node db/migrate.js up
+node db/migrate.js baseline 004 # record 001..004 as applied without running them
+```
+
+Each file runs in one transaction with its `schema_migrations` row, and an advisory lock keeps two runners apart. Files may keep their own `BEGIN;` / `COMMIT;` lines (the runner drops them). A file that changes after it was applied is reported by `status`, never re-run; write a new migration instead. `deploy.sh` applies pending migrations after a `pg_dump` of `trade_db`; a code rollback does not undo them, so keep migrations additive.
 
 - `001_trading_control.sql`: kill switch state, audit log, engine heartbeat.
 - `002_mark_synthetic_trade_logs.sql`: flags synthetic Web3 rows.
 - `003_market_providers.sql`: `market_providers`, provider columns on `instrument_registry`, `suite_settings`, default providers and routing.
 - `004_suite_audit_log.sql`: audit log of UI changes.
 
+The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
+
+## Code layout
+
+```
+server.js                 entry point: context, app, jobs, graceful shutdown
+src/config.js             environment -> config
+src/context.js            builds the services (tests replace any of them)
+src/app.js                Express app: middleware, static files, routes, error handler
+src/http/                 security headers, request ids and logging, validation, control guard, errors
+src/schemas.js            zod schemas for every request body and query
+src/routes/               one file per area (health, settings, providers, market, reports, integrations, control)
+src/services/             database and upstream access (providers, instruments, market data, reports, control, Freqtrade, identity, audit)
+src/jobs/                 ticker refresh, halt guard
+lib/providers.js          provider adapters
+lib/resilience.js         rate limit and circuit breaker
+db/migrate.js             migration runner
+public/                   front end
+test/                     node:test suites (unit, http, db)
+```
+
+Responses keep one shape: `{ "success": true, ... }`, or `{ "success": false, "error": "...", "code": "bad_request", "requestId": "..." }` with a 4xx/5xx status (`details` lists every validation issue). Every response carries `X-Request-Id`; send your own to follow a call through the logs.
+
+## Logs
+
+JSON lines on stdout (pino), collected by journald. Successful reads are logged at debug level; writes, 4xx/5xx and requests slower than 2 s at info or above, with the request id and, for control calls, the caller. `LOG_LEVEL` sets the level (default `info`).
+
+```bash
+journalctl -u trading-suite -o cat | jq -c 'select(.level >= 40)'          # warnings and errors
+journalctl -u trading-suite -o cat | jq -c 'select(.reqId == "<id>")'      # one request
+```
+
+## Tests
+
+```bash
+npm test                                                                    # unit and HTTP tests (no database needed)
+TEST_DATABASE_URL=postgres://suite:suite@localhost/trade_db_test npm test   # plus migrations and the API on PostgreSQL
+```
+
+The database tests drop and recreate the `public` schema, so they refuse a database whose name does not contain `test`; they load `test/fixtures/external-tables.sql` (the tables other components own) and then the migrations. GitHub Actions runs everything on each push with PostgreSQL 16, plus `npm audit`; Dependabot proposes dependency updates weekly.
+
 ## Run and deploy
 
 ```bash
 npm ci
-PORT=18796 node server.js   # local run
+PORT=18796 SUITE_JOBS=0 node server.js   # local run; SUITE_JOBS=0 skips the ticker refresh and halt guard
 ```
 
-On the VPS, deploy with `scripts/deploy.sh trading-suite` from the `openclaw-workspace` repo (backup, pull, `node --check`, restart, health checks, automatic rollback).
+On the VPS, deploy with `scripts/deploy.sh trading-suite` from the `openclaw-workspace` repo: backup, pull, `npm ci` when the lockfile changed, `npm test`, pending migrations (after a `pg_dump`), restart, health checks, and automatic rollback of code and dependencies.

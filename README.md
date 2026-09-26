@@ -45,7 +45,7 @@ Instruments are routed to a row in `market_providers`; the row's `kind` picks an
 
 Provider base URLs must be public `https` hosts, and template URLs must stay on the base URL. API keys are never stored in the database: `credential_env` names a variable whose value lives in `~/.openclaw/credentials/market-providers.env`, and a template can use it as `{credential}` in `headers`.
 
-A background job refreshes `last_price`, `change_24h_pct` and `volume_24h_usd` of active instruments on the configured interval (GeckoTerminal at most every 5 minutes, within its 30 calls/minute limit).
+A background job refreshes `last_price`, `change_24h_pct` and `volume_24h_usd` of active instruments on the configured interval (GeckoTerminal at most every 5 minutes, one call every 6.5 s, and a one-minute pause after a 429). When a provider fails, the chart keeps the last good candles and marks them stale.
 
 ## Security
 

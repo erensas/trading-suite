@@ -170,8 +170,8 @@ async function loadCandles({ incremental = false } = {}) {
     const data = await api(`api/trading/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=${TS.settings.candleLimit || 300}`);
     if (request !== TS.candleRequest) return;
     const candles = data.candles || [];
-    $('chart-source').textContent = `${data.provider.name} · ${data.source !== data.provider.name ? data.source : tf}`;
-    $('chart-source').title = data.source;
+    $('chart-source').textContent = `${data.stale ? '⚠ stale · ' : ''}${data.provider.name} · ${data.source !== data.provider.name ? data.source : tf}`;
+    $('chart-source').title = data.stale ? `Showing data from ${data.fetchedAt}: ${data.staleReason}` : data.source;
     if (!candles.length) {
       TS.candles = [];
       candleSeries.setData([]);

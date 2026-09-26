@@ -431,10 +431,18 @@ app.get('/api/trading/candles', async (req, res) => {
     if (hit && Date.now() - hit.at < ttl) return res.json(hit.body);
 
     const adapter = adapterFor(provider);
-    const candles = await adapter.candles(provider, inst, tf, limit, providerCtx);
+    let candles;
+    try {
+      candles = await adapter.candles(provider, inst, tf, limit, providerCtx);
+    } catch (e) {
+      // Serve the last good response (marked stale) rather than an empty chart.
+      if (hit && !e.unsupported) return res.json({ ...hit.body, stale: true, staleReason: e.message, fetchedAt: new Date(hit.at).toISOString() });
+      throw e;
+    }
     let source = provider.name;
     if (adapter.describe) source = await adapter.describe(provider, inst).catch(() => source);
     const body = { success: true, symbol, timeframe: tf, provider: { id: provider.id, name: provider.name, kind: provider.kind }, source, candles };
+    candleCache.delete(key);
     candleCache.set(key, { at: Date.now(), body });
     if (candleCache.size > 300) candleCache.delete(candleCache.keys().next().value);
     res.json(body);
@@ -492,8 +500,10 @@ async function refreshTickers() {
     const doGecko = Date.now() - lastGeckoRefresh >= GECKO_MIN_INTERVAL_MS;
     if (doGecko) lastGeckoRefresh = Date.now();
     const jobs = r.rows.filter((row) => row.p_kind !== 'freqtrade' && (row.p_kind !== 'geckoterminal' || doGecko));
-    const queue = [...jobs];
-    const worker = async () => {
+    // GeckoTerminal is rate limited per IP, so its instruments go through one worker.
+    const geckoQueue = jobs.filter((row) => row.p_kind === 'geckoterminal');
+    const queue = jobs.filter((row) => row.p_kind !== 'geckoterminal');
+    const worker = async (queue) => {
       while (queue.length) {
         const row = queue.shift();
         const provider = { id: row.p_id, name: row.p_name, kind: row.p_kind, base_url: row.p_base_url, config: row.p_config || {}, credential_env: row.p_credential_env };
@@ -515,7 +525,7 @@ async function refreshTickers() {
         }
       }
     };
-    await Promise.all([worker(), worker(), worker()]);
+    await Promise.all([worker(queue), worker(queue), worker(queue), worker(geckoQueue)]);
   } catch (e) {
     if (e.code !== UNDEFINED_TABLE) errors._ = e.message;
   } finally {

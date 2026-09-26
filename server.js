@@ -12,14 +12,15 @@ const HOST = process.env.HOST || '127.0.0.1';
 
 app.disable('x-powered-by');
 
-// Security headers. Scripts come from this app and jsDelivr (chart library) only; inline
-// styles stay allowed, inline scripts do not. The shell embeds the system dashboard (same
-// origin) and FreqUI (same host, Caddy ports 8181 / 8443), so frame-src names that host.
+// Security headers. Every script, style and font is served by this app (npm packages under
+// /vendor, no CDNs); inline styles stay allowed, inline scripts do not. The shell embeds the
+// system dashboard (same origin) and FreqUI (same host, Caddy ports 8181 / 8443), so
+// frame-src names that host.
 const CSP_BASE = [
   "default-src 'self'",
-  "script-src 'self' https://cdn.jsdelivr.net",
-  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com",
-  "font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data:",
   "connect-src 'self'",
   "object-src 'none'",
@@ -42,6 +43,18 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Front-end libraries from package.json (pinned versions), served from node_modules.
+const VENDOR = {
+  '/vendor/fontawesome/css': '@fortawesome/fontawesome-free/css',
+  '/vendor/fontawesome/webfonts': '@fortawesome/fontawesome-free/webfonts',
+  '/vendor/lightweight-charts': 'lightweight-charts/dist',
+  '/vendor/fonts/inter': '@fontsource-variable/inter',
+  '/vendor/fonts/jetbrains-mono': '@fontsource-variable/jetbrains-mono',
+};
+for (const [route, dir] of Object.entries(VENDOR)) {
+  app.use(route, express.static(path.join(__dirname, 'node_modules', dir), { maxAge: '7d', index: false }));
+}
 
 // PostgreSQL pool for the dedicated trade database (Unix socket, peer auth).
 const postgresPool = new Pool({
@@ -970,6 +983,8 @@ app.get('/api/integrations/freqtrade', async (req, res) => {
       openTrades: (status || []).map((t) => ({
         id: t.trade_id, pair: t.pair, open_rate: t.open_rate, current_rate: t.current_rate, stake_amount: t.stake_amount,
         profit_abs: t.profit_abs, profit_pct: t.profit_pct, open_date: t.open_date,
+        amount: t.amount, is_short: !!t.is_short, leverage: t.leverage,
+        stop_loss_abs: t.stop_loss_abs, liquidation_price: t.liquidation_price,
       })),
       profit,
     });

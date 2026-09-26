@@ -61,8 +61,9 @@ function renderControl(control) {
   btn.disabled = !installed;
   btn.classList.toggle('resume-btn', halted);
   btn.innerHTML = halted
-    ? '<i class="fa-solid fa-play"></i> RESUME'
-    : '<i class="fa-solid fa-power-off"></i> KILL SWITCH';
+    ? '<i class="fa-solid fa-play" aria-hidden="true"></i><span class="lbl">RESUME</span>'
+    : '<i class="fa-solid fa-power-off" aria-hidden="true"></i><span class="lbl">KILL SWITCH</span>';
+  btn.setAttribute('aria-label', halted ? 'Resume trading' : 'Kill switch: halt trading');
   btn.title = installed ? '' : 'Control table not installed (db/migrations/001_trading_control.sql)';
 
   if (kpi) {
@@ -145,7 +146,7 @@ async function submitControlModal() {
   }
 }
 
-function switchView(view) {
+function switchView(view, { history: addHistory = true } = {}) {
   if (!SHELL_VIEWS.includes(view)) return;
   document.querySelectorAll('.app-view').forEach((el) => el.classList.toggle('hidden', el.id !== `view-${view}`));
   document.querySelectorAll('.view-btn[data-view]').forEach((btn) => btn.classList.toggle('active', btn.dataset.view === view));
@@ -154,7 +155,12 @@ function switchView(view) {
   const frame = document.querySelector(`#view-${view} iframe[data-src]`);
   if (frame && !frame.getAttribute('src')) frame.setAttribute('src', resolveFrameSrc(frame.dataset.src));
 
-  history.replaceState(null, '', view === 'trading' ? location.pathname : `#${view}`);
+  // The trading view keeps its own route (#markets/..., see app.js); the other views are #system and #frequi.
+  if (addHistory) {
+    if (view !== 'trading') history.pushState(null, '', `#${view}`);
+    else if (window.TS && TS.syncUrl) TS.syncUrl(true);
+    else history.replaceState(null, '', location.pathname);
+  }
 
   if (view === 'trading' && typeof chart !== 'undefined' && chart) {
     const container = document.getElementById('chart-wrapper');
@@ -190,7 +196,59 @@ document.addEventListener('keydown', (event) => {
 
 document.addEventListener('DOMContentLoaded', () => {
   const initialView = location.hash.replace('#', '');
-  if (SHELL_VIEWS.includes(initialView)) switchView(initialView);
+  if (SHELL_VIEWS.includes(initialView)) switchView(initialView, { history: false });
   loadControlStatus();
   setInterval(loadControlStatus, 10000);
+});
+
+// ---- modal focus management -------------------------------------------------------
+// Focus moves into a modal when it opens, Tab and Shift+Tab stay inside it, and focus goes
+// back to the element that opened it when it closes.
+const FOCUSABLE = 'a[href], button:not([disabled]):not([hidden]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let modalOpener = null;
+let lastFocusOutsideModal = null;
+document.addEventListener('focusin', (event) => {
+  if (!event.target.closest('.modal-backdrop')) lastFocusOutsideModal = event.target;
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const observer = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      const modal = m.target;
+      if (!modal.classList.contains('hidden')) {
+        modalOpener = lastFocusOutsideModal;
+        if (!modal.contains(document.activeElement)) {
+          setTimeout(() => {
+            if (modal.contains(document.activeElement)) return;
+            const first = modal.querySelector('input:not([type=checkbox]):not([disabled]), select, textarea') || modal.querySelector(FOCUSABLE);
+            if (first) first.focus();
+          }, 0);
+        }
+      } else if (modalOpener && document.body.contains(modalOpener)) {
+        modalOpener.focus();
+        modalOpener = null;
+      }
+    }
+  });
+  document.querySelectorAll('.modal-backdrop').forEach((el) => observer.observe(el, { attributes: true, attributeFilter: ['class'] }));
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab') return;
+  const modal = document.querySelector('.modal-backdrop:not(.hidden)');
+  if (!modal) return;
+  const items = [...modal.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!modal.contains(document.activeElement)) {
+    event.preventDefault();
+    first.focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 });

@@ -60,29 +60,47 @@ const apiSend = (method, url, body) =>
 TS.api = api;
 TS.apiSend = apiSend;
 
-function fmtPrice(v) {
-  const n = Number(v);
-  if (v === null || v === undefined || v === '' || !Number.isFinite(n)) return '-';
-  const a = Math.abs(n);
-  if (a >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  if (a >= 1) return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
-  if (a === 0) return '0';
-  return n.toPrecision(4);
+// Number formatting: cached Intl formatters, 4 significant digits below 1, and the
+// subscript-zero notation for micro prices (0.00000439 -> 0.0₅439).
+const NUMBER_FORMATS = new Map();
+function nf(options) {
+  const key = JSON.stringify(options);
+  if (!NUMBER_FORMATS.has(key)) NUMBER_FORMATS.set(key, new Intl.NumberFormat('en-US', options));
+  return NUMBER_FORMATS.get(key);
 }
+const SUBSCRIPT = '₀₁₂₃₄₅₆₇₈₉';
+const toNumber = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+
+function fmtPrice(v) {
+  const n = toNumber(v);
+  if (!Number.isFinite(n)) return '-';
+  const a = Math.abs(n);
+  if (a === 0) return '0';
+  if (a >= 1000) return nf({ maximumFractionDigits: 2 }).format(n);
+  if (a >= 1) return nf({ maximumFractionDigits: 4 }).format(n);
+  if (a >= 0.001) return nf({ maximumSignificantDigits: 4 }).format(n);
+  const [mantissa, exp] = a.toExponential(3).split('e');
+  const zeros = -Number(exp) - 1;
+  const digits = mantissa.replace('.', '').replace(/0+$/, '');
+  const sub = String(zeros).split('').map((d) => SUBSCRIPT[d]).join('');
+  return `${n < 0 ? '-' : ''}0.0${sub}${digits}`;
+}
+// Direction is shown by an arrow as well as by colour.
 function fmtPct(v) {
-  const n = Number(v);
-  if (v === null || v === undefined || !Number.isFinite(n)) return '-';
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+  const n = toNumber(v);
+  if (!Number.isFinite(n)) return '-';
+  const arrow = n > 0 ? '▲ ' : n < 0 ? '▼ ' : '';
+  return `${arrow}${nf({ minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n))}%`;
 }
 function fmtCompact(v) {
-  const n = Number(v);
-  if (v === null || v === undefined || !Number.isFinite(n)) return '-';
-  return n.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 2 });
+  const n = toNumber(v);
+  if (!Number.isFinite(n)) return '-';
+  return nf({ notation: 'compact', maximumFractionDigits: 2 }).format(n);
 }
 function fmtUsd(v, digits = 2) {
-  const n = Number(v);
-  if (v === null || v === undefined || !Number.isFinite(n)) return '-';
-  return `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  const n = toNumber(v);
+  if (!Number.isFinite(n)) return '-';
+  return nf({ style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 function fmtTime(v) {
   if (!v) return '-';
@@ -97,9 +115,47 @@ function ago(v) {
   if (s < 129600) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
-const changeClass = (v) => (Number(v) >= 0 ? 'pos' : 'neg');
+const changeClass = (v) => (Number(v) > 0 ? 'pos' : Number(v) < 0 ? 'neg' : 'muted');
 const pairBySymbol = (s) => TS.pairs.find((p) => p.symbol === s);
 TS.fmt = { fmtPrice, fmtPct, fmtCompact, fmtUsd, fmtTime, ago };
+
+// ---- data freshness -----------------------------------------------------------------
+// Each loader reports success (markFresh) or failure (markError); every [data-age] label
+// shows how old its data is and turns amber once it is older than expected.
+const FRESH = {};
+const STALE_AFTER_S = { candles: 60, orderbook: 20, pairs: 120, overview: 60, freqtrade: 40, dex: 40, news: 900, economist: 900 };
+const RETRY = {};
+
+function shortAge(seconds) {
+  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
+}
+function markFresh(key, at = Date.now()) {
+  FRESH[key] = { at, error: null };
+  renderAges(key);
+}
+function markError(key, message) {
+  FRESH[key] = { at: FRESH[key] ? FRESH[key].at : null, error: message || 'update failed' };
+  renderAges(key);
+}
+function renderAges(only) {
+  document.querySelectorAll(only ? `[data-age="${only}"]` : '[data-age]').forEach((el) => {
+    const key = el.dataset.age;
+    const f = FRESH[key];
+    if (!f) {
+      el.textContent = '';
+      return;
+    }
+    const age = f.at ? (Date.now() - f.at) / 1000 : null;
+    const stale = !!f.error || age === null || age > (STALE_AFTER_S[key] || 120);
+    el.classList.toggle('stale', stale);
+    el.textContent = f.error ? `⚠ ${age === null ? 'no data' : `${shortAge(age)} old`}` : `${shortAge(age)} ago`;
+    el.title = f.error ? `Last update failed: ${f.error}` : `Updated ${new Date(f.at).toLocaleTimeString('en-GB')}`;
+  });
+}
+const retryButton = (key) => `<button type="button" class="icon-btn" data-retry="${key}"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry</button>`;
 
 function showToast(title, message, type = 'info') {
   const container = $('toast-container');
@@ -128,9 +184,10 @@ function initChart() {
   chart = LightweightCharts.createChart(el, {
     width: el.clientWidth,
     height: el.clientHeight,
-    layout: { background: { type: 'solid', color: '#020617' }, textColor: '#94a3b8', fontSize: 11, fontFamily: 'JetBrains Mono' },
+    layout: { background: { type: 'solid', color: '#020617' }, textColor: '#94a3b8', fontSize: 11, fontFamily: "'JetBrains Mono Variable', ui-monospace, monospace" },
     grid: { vertLines: { color: '#111c33' }, horzLines: { color: '#111c33' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    localization: { priceFormatter: fmtPrice },
     rightPriceScale: { borderColor: '#1e293b' },
     timeScale: { borderColor: '#1e293b', timeVisible: true, secondsVisible: false },
   });
@@ -140,6 +197,57 @@ function initChart() {
   volumeSeries = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
   new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })).observe(el);
+  chart.subscribeCrosshairMove((param) => {
+    const bar = param && param.time ? param.seriesData.get(candleSeries) : null;
+    renderLegend(bar);
+  });
+}
+
+// OHLCV legend: the bar under the crosshair, or the last bar.
+function renderLegend(bar) {
+  const box = $('chart-legend');
+  if (!box) return;
+  const c = bar || TS.candles[TS.candles.length - 1];
+  if (!c) {
+    box.innerHTML = '';
+    return;
+  }
+  const full = TS.candles.find((x) => x.time === c.time) || c;
+  const chg = full.open ? ((full.close - full.open) / full.open) * 100 : null;
+  const cls = changeClass(chg);
+  box.innerHTML = `<span class="lg-sym">${esc(TS.activeSymbol || '')} · ${esc(TS.activeTf)}</span>
+    <span>O <b class="${cls}">${fmtPrice(full.open)}</b></span><span>H <b class="${cls}">${fmtPrice(full.high)}</b></span>
+    <span>L <b class="${cls}">${fmtPrice(full.low)}</b></span><span>C <b class="${cls}">${fmtPrice(full.close)}</b></span>
+    ${chg === null ? '' : `<span class="${cls}">${fmtPct(chg)}</span>`}
+    ${full.volume ? `<span>V <b>${fmtCompact(full.volume)}</b></span>` : ''}`;
+}
+
+// Entry, stop-loss and liquidation lines of open Freqtrade trades on the active pair.
+let tradeLines = [];
+async function loadTradeLines() {
+  const symbol = TS.activeSymbol;
+  let trades = [];
+  if (symbol && TS.showMarkers) {
+    try {
+      const d = await api('api/integrations/freqtrade');
+      trades = (d.openTrades || []).filter((t) => String(t.pair || '').split(':')[0] === symbol);
+    } catch (e) {
+      trades = [];
+    }
+  }
+  if (symbol !== TS.activeSymbol || !candleSeries) return;
+  tradeLines.forEach((l) => candleSeries.removePriceLine(l));
+  tradeLines = [];
+  const dashed = LightweightCharts.LineStyle.Dashed;
+  for (const t of trades) {
+    const side = t.is_short ? 'short' : 'long';
+    const add = (price, color, title) => {
+      if (Number(price) > 0) tradeLines.push(candleSeries.createPriceLine({ price: Number(price), color, lineWidth: 1, lineStyle: dashed, axisLabelVisible: true, title }));
+    };
+    add(t.open_rate, '#38bdf8', `#${t.id} ${side} entry`);
+    add(t.stop_loss_abs, '#fb7185', `#${t.id} stop`);
+    add(t.liquidation_price, '#f59e0b', `#${t.id} liq.`);
+  }
 }
 
 function priceFormatFor(candles) {
@@ -165,13 +273,19 @@ async function loadCandles({ incremental = false } = {}) {
   const tf = TS.activeTf;
   if (!symbol) return;
   const request = ++TS.candleRequest;
-  if (!incremental) chartMessage('<i class="fa-solid fa-spinner fa-spin"></i>&nbsp; Loading candles…');
+  if (!incremental) chartMessage('<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>&nbsp; Loading candles…');
   try {
     const data = await api(`api/trading/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=${TS.settings.candleLimit || 300}`);
     if (request !== TS.candleRequest) return;
     const candles = data.candles || [];
-    $('chart-source').textContent = `${data.stale ? '⚠ stale · ' : ''}${data.provider.name} · ${data.source !== data.provider.name ? data.source : tf}`;
-    $('chart-source').title = data.stale ? `Showing data from ${data.fetchedAt}: ${data.staleReason}` : data.source;
+    $('chart-source').textContent = `${data.provider.name} · ${data.source !== data.provider.name ? data.source : tf}`;
+    $('chart-source').title = data.source;
+    if (data.stale) {
+      FRESH.candles = { at: Date.parse(data.fetchedAt) || null, error: data.staleReason || 'provider failed; showing the last good candles' };
+      renderAges('candles');
+    } else {
+      markFresh('candles');
+    }
     if (!candles.length) {
       TS.candles = [];
       candleSeries.setData([]);
@@ -198,13 +312,16 @@ async function loadCandles({ incremental = false } = {}) {
     renderIndicators();
     applyMarkers();
     updateLivePrice(candles);
+    renderLegend(null);
   } catch (e) {
     if (request !== TS.candleRequest) return;
     TS.candles = [];
     candleSeries.setData([]);
     volumeSeries.setData([]);
-    chartMessage(`<div><i class="fa-solid fa-triangle-exclamation"></i> No chart for <b>${esc(symbol)}</b> (${tf})<br><span class="muted">${esc(e.message)}</span><br><span class="hint">Pick another timeframe, or change the instrument's provider in Settings → Instruments.</span></div>`);
+    chartMessage(`<div><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> No chart for <b>${esc(symbol)}</b> (${tf})<br><span class="muted">${esc(e.message)}</span><br><span class="hint">Pick another timeframe, or change the instrument's provider in Settings → Instruments.</span><br>${retryButton('candles')}</div>`);
     $('chart-source').textContent = '-';
+    markError('candles', e.message);
+    renderLegend(null);
   }
 }
 
@@ -265,6 +382,7 @@ async function loadMarkers() {
     TS.markers = [];
   }
   applyMarkers();
+  loadTradeLines();
 }
 
 // Markers must sit on an existing bar: snap each to the bar that contains it and drop
@@ -296,8 +414,10 @@ async function loadPairs() {
   try {
     const data = await api('api/trading/pairs');
     TS.pairs = data.pairs || [];
+    markFresh('pairs');
   } catch (e) {
-    showToast('Instruments', esc(e.message), 'error');
+    markError('pairs', e.message);
+    if (!TS.pairs.length) showToast('Instruments', esc(e.message), 'error');
   }
   renderWatchlist();
   renderPickerList();
@@ -340,11 +460,13 @@ function renderPickerList() {
   const groups = {};
   rows.forEach((p) => (groups[p.category] = groups[p.category] || []).push(p));
   pickerFocus = -1;
+  $('pair-picker-search').removeAttribute('aria-activedescendant');
+  let optionIndex = 0;
   list.innerHTML = rows.length
     ? Object.entries(groups)
         .map(([cat, ps]) => `<div class="pair-group">${esc(CATEGORY_LABELS[cat] || cat)}</div>` +
           ps.map((p) => `
-            <div class="pair-option${p.symbol === TS.activeSymbol ? ' active' : ''}" role="option" data-symbol="${esc(p.symbol)}">
+            <div class="pair-option${p.symbol === TS.activeSymbol ? ' active' : ''}" role="option" id="pair-opt-${optionIndex++}" aria-selected="${p.symbol === TS.activeSymbol}" data-symbol="${esc(p.symbol)}">
               <span><span class="sym">${esc(p.symbol)}</span> <span class="prov">${esc(p.provider_name || 'no provider')}</span></span>
               <span class="mono">${fmtPrice(p.last_price)}</span>
               <span class="mono ${p.change_24h_pct === null ? 'muted' : changeClass(p.change_24h_pct)}">${fmtPct(p.change_24h_pct)}</span>
@@ -382,9 +504,13 @@ function selectPair(symbol, { switchTab = false } = {}) {
   renderWatchlist();
   openPicker(false);
   if (switchTab) showTab('chart');
+  if (changed) syncUrl(true);
   if (!changed && TS.candles.length) return;
   TS.candles = [];
   TS.markers = [];
+  delete FRESH.candles;
+  delete FRESH.orderbook;
+  renderAges();
   $('active-price').textContent = '-';
   $('active-change').textContent = '';
   $('ob-mid-price').textContent = '-';
@@ -400,10 +526,74 @@ function setTimeframe(tf) {
   if (!TIMEFRAMES.includes(tf)) return;
   TS.activeTf = tf;
   storage.set('tf', tf);
-  document.querySelectorAll('#tf-group .tf-btn').forEach((b) => b.classList.toggle('active', b.dataset.tf === tf));
+  markTimeframe();
+  syncUrl(false);
   TS.candles = [];
   loadCandles();
 }
+function markTimeframe() {
+  document.querySelectorAll('#tf-group .tf-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tf === TS.activeTf);
+    b.setAttribute('aria-pressed', String(b.dataset.tf === TS.activeTf));
+  });
+}
+
+// ---- URL state ------------------------------------------------------------------------
+// #markets/<pair>/<tf>, #screener, #freqtrade, #dex, #settings/<pane>, #logs. The shell
+// owns #system and #frequi. Tab and pair changes add a history entry (Back works), a
+// timeframe change replaces it.
+const ROUTE_OF_TAB = { chart: 'markets', screener: 'screener', freqtrade: 'freqtrade', dex: 'dex', settings: 'settings', logs: 'logs' };
+const TAB_OF_ROUTE = Object.fromEntries(Object.entries(ROUTE_OF_TAB).map(([t, r]) => [r, t]));
+let routing = false;
+
+function currentRoute() {
+  const route = ROUTE_OF_TAB[TS.activeTab] || 'markets';
+  if (route === 'markets' && TS.activeSymbol) return `markets/${encodeURIComponent(TS.activeSymbol)}/${TS.activeTf}`;
+  if (route === 'settings') return `settings/${TS.settingsPane || 'general'}`;
+  return route;
+}
+function syncUrl(push) {
+  if (routing || document.getElementById('view-trading').classList.contains('hidden')) return;
+  const hash = `#${currentRoute()}`;
+  if (location.hash === hash) return;
+  history[push ? 'pushState' : 'replaceState'](null, '', hash);
+}
+TS.syncUrl = syncUrl;
+
+function parseRoute(hash) {
+  const [head, a, b] = String(hash || '').replace(/^#/, '').split('/');
+  const tab = TAB_OF_ROUTE[head];
+  if (!tab) return null;
+  const route = { tab };
+  if (tab === 'chart') {
+    try {
+      route.symbol = a ? decodeURIComponent(a) : null;
+    } catch (e) {
+      route.symbol = null;
+    }
+    route.tf = TIMEFRAMES.includes(b) ? b : null;
+  }
+  if (tab === 'settings' && a) route.pane = a;
+  return route;
+}
+function applyRoute(route) {
+  if (!route) return;
+  routing = true;
+  try {
+    if (route.pane && TS.setSettingsPane) TS.setSettingsPane(route.pane);
+    if (route.tf && route.tf !== TS.activeTf) {
+      TS.activeTf = route.tf;
+      markTimeframe();
+      TS.candles = [];
+    }
+    if (route.symbol && pairBySymbol(route.symbol)) selectPair(route.symbol);
+    else if (route.tf && TS.activeSymbol) loadCandles();
+    showTab(route.tab);
+  } finally {
+    routing = false;
+  }
+}
+TS.applyRoute = (hash) => applyRoute(parseRoute(hash));
 
 // ---- side panel ----------------------------------------------------------------
 async function loadOrderbook() {
@@ -429,12 +619,20 @@ async function loadOrderbook() {
     const ask = Number(data.asks[0] && data.asks[0][0]);
     const bid = Number(data.bids[0] && data.bids[0][0]);
     $('ob-mid-price').textContent = ask && bid ? `${fmtPrice((ask + bid) / 2)}  ·  spread ${(((ask - bid) / ((ask + bid) / 2)) * 100).toFixed(3)}%` : '-';
+    markFresh('orderbook');
   } catch (e) {
     if (symbol !== TS.activeSymbol) return;
     asks.innerHTML = '';
     bids.innerHTML = '';
     $('ob-provider').textContent = '';
-    $('ob-mid-price').innerHTML = `<span class="muted small">${e.unsupported ? 'No order book from this provider' : esc(e.message)}</span>`;
+    if (e.unsupported) {
+      delete FRESH.orderbook;
+      renderAges('orderbook');
+      $('ob-mid-price').innerHTML = '<span class="muted small">No order book from this provider</span>';
+    } else {
+      markError('orderbook', e.message);
+      $('ob-mid-price').innerHTML = `<span class="muted small">${esc(e.message)}</span> ${retryButton('orderbook')}`;
+    }
   }
 }
 
@@ -457,7 +655,7 @@ async function loadEconomist() {
       <div class="hint">Updated ${ago(s.updated_at)}</div>`;
   } catch (e) {
     box.className = 'econ-box muted';
-    box.textContent = e.message;
+    box.innerHTML = `${esc(e.message)} ${retryButton('economist')}`;
   }
 }
 
@@ -475,8 +673,10 @@ async function loadNews() {
             </div>`)
           .join('')
       : '<div class="muted small">No news for this pair.</div>';
+    markFresh('news');
   } catch (e) {
-    box.innerHTML = `<div class="muted small">${esc(e.message)}</div>`;
+    markError('news', e.message);
+    box.innerHTML = `<div class="muted small">${esc(e.message)} ${retryButton('news')}</div>`;
   }
 }
 
@@ -525,7 +725,13 @@ async function loadOverview() {
     $('kpi-winrate').textContent = s.winRatePercent === null ? '-' : `${s.winRatePercent}%`;
     $('kpi-open').textContent = s.openTradesCount;
     $('kpi-score').textContent = s.profitScore === null ? '-' : `${s.profitScore} / 100`;
-  } catch (e) {}
+    markFresh('overview');
+  } catch (e) {
+    markError('overview', e.message);
+    ['kpi-pnl', 'kpi-capital', 'kpi-winrate', 'kpi-open', 'kpi-score'].forEach((id) => {
+      if ($(id).querySelector('.skeleton')) $(id).textContent = '-';
+    });
+  }
 }
 
 // ---- screener ----------------------------------------------------------------------
@@ -533,7 +739,7 @@ let screenerCat = 'ALL';
 function renderScreener() {
   const counts = TS.pairs.reduce((acc, p) => ((acc[p.category] = (acc[p.category] || 0) + 1), acc), {});
   $('screener-cats').innerHTML = ['ALL', ...Object.keys(CATEGORY_LABELS)]
-    .map((c) => `<button class="tf-btn${c === screenerCat ? ' active' : ''}" data-cat="${c}">${c === 'ALL' ? 'All' : CATEGORY_LABELS[c]} (${c === 'ALL' ? TS.pairs.length : counts[c] || 0})</button>`)
+    .map((c) => `<button type="button" class="tf-btn${c === screenerCat ? ' active' : ''}" aria-pressed="${c === screenerCat}" data-cat="${c}">${c === 'ALL' ? 'All' : CATEGORY_LABELS[c]} (${c === 'ALL' ? TS.pairs.length : counts[c] || 0})</button>`)
     .join('');
   const q = $('screener-search').value.trim().toLowerCase();
   const rows = TS.pairs.filter((p) => matchesFilter(p, q, screenerCat));
@@ -594,13 +800,15 @@ async function loadFreqtradeTab() {
             </tr>`)
           .join('')
       : '<tr><td colspan="7" class="empty">No open trades.</td></tr>';
+    markFresh('freqtrade');
   } catch (e) {
+    markError('freqtrade', e.message);
     $('ft-state').innerHTML = '<span class="pill pill-red">API unreachable</span>';
     $('ft-config').className = 'kv-grid muted';
-    $('ft-config').textContent = `Freqtrade API: ${e.message}`;
+    $('ft-config').innerHTML = `Freqtrade API: ${esc(e.message)} ${retryButton('freqtrade')}`;
     $('ft-profit').textContent = '';
     $('ft-whitelist').innerHTML = '';
-    $('ft-open-tbody').innerHTML = '<tr><td colspan="7" class="empty">Freqtrade API unreachable.</td></tr>';
+    $('ft-open-tbody').innerHTML = `<tr><td colspan="7" class="empty">Freqtrade API unreachable. ${retryButton('freqtrade')}</td></tr>`;
   }
   try {
     const d = await api('api/trading/freqtrade');
@@ -621,7 +829,7 @@ async function loadFreqtradeTab() {
           .join('')
       : '<tr><td colspan="10" class="empty">No trades.</td></tr>';
   } catch (e) {
-    $('freqtrade-tbody').innerHTML = `<tr><td colspan="10" class="empty">${esc(e.message)}</td></tr>`;
+    $('freqtrade-tbody').innerHTML = `<tr><td colspan="10" class="empty">${esc(e.message)} ${retryButton('freqtrade')}</td></tr>`;
   }
 }
 
@@ -640,14 +848,16 @@ async function loadDexTrades() {
                 <td class="mono" title="${esc(t.token_address || '')}">${esc(token)}</td>
                 <td class="r">${fmtPrice(t.amount_in)}</td><td class="r">${fmtPrice(t.amount_out)}</td>
                 <td class="r">${t.gas_used ?? '-'}</td>
-                <td class="r ${changeClass(pnl)}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(4)}</td>
+                <td class="r ${changeClass(pnl)}">${fmtUsd(pnl, 4)}</td>
                 <td><span class="pill ${/FAIL|REVERT/i.test(t.status || '') ? 'pill-red' : 'pill-green'}">${esc(t.status || '-')}</span></td>
               </tr>`;
           })
           .join('')
       : '<tr><td colspan="9" class="empty">No executions.</td></tr>';
+    markFresh('dex');
   } catch (e) {
-    $('dex-tbody').innerHTML = `<tr><td colspan="9" class="empty">${esc(e.message)}</td></tr>`;
+    markError('dex', e.message);
+    $('dex-tbody').innerHTML = `<tr><td colspan="9" class="empty">${esc(e.message)} ${retryButton('dex')}</td></tr>`;
   }
 }
 
@@ -670,10 +880,18 @@ function initLogStream() {
 
 // ---- tabs --------------------------------------------------------------------------
 function showTab(tab) {
+  if (!document.getElementById(`tab-${tab}`)) tab = 'chart';
+  const changed = tab !== TS.activeTab;
   TS.activeTab = tab;
   document.querySelectorAll('.tab-content').forEach((el) => el.classList.toggle('hidden', el.id !== `tab-${tab}`));
-  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-btn').forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
   storage.set('tab', tab);
+  syncUrl(changed);
   if (tab === 'screener') loadPairs();
   if (tab === 'freqtrade') loadFreqtradeTab();
   if (tab === 'dex') loadDexTrades();
@@ -685,12 +903,25 @@ TS.showTab = showTab;
 function setWatchlistVisible(visible) {
   $('markets-layout').classList.toggle('no-watchlist', !visible);
   $('btn-watchlist').classList.toggle('active', visible);
+  $('btn-watchlist').setAttribute('aria-pressed', String(visible));
   storage.set('watchlist', visible);
 }
 
 function bindEvents() {
   document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
-  $('tf-group').innerHTML = TIMEFRAMES.map((tf) => `<button class="tf-btn" data-tf="${tf}">${tf}</button>`).join('');
+  // Tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between tabs.
+  $('nav-tabs').addEventListener('keydown', (e) => {
+    const tabs = [...document.querySelectorAll('#nav-tabs [role="tab"]')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    const target = tabs[(next + tabs.length) % tabs.length];
+    target.focus();
+    showTab(target.dataset.tab);
+  });
+  $('tf-group').innerHTML = TIMEFRAMES.map((tf) => `<button type="button" class="tf-btn" data-tf="${tf}" aria-pressed="false">${tf}</button>`).join('');
   $('tf-group').addEventListener('click', (e) => {
     const b = e.target.closest('[data-tf]');
     if (b) setTimeframe(b.dataset.tf);
@@ -700,6 +931,7 @@ function bindEvents() {
       const key = b.dataset.indicator;
       TS.indicators[key] = !TS.indicators[key];
       b.classList.toggle('active', TS.indicators[key]);
+      b.setAttribute('aria-pressed', String(TS.indicators[key]));
       storage.set('indicators', TS.indicators);
       renderIndicators();
     })
@@ -707,7 +939,26 @@ function bindEvents() {
   $('btn-markers').addEventListener('click', () => {
     TS.showMarkers = !TS.showMarkers;
     $('btn-markers').classList.toggle('active', TS.showMarkers);
+    $('btn-markers').setAttribute('aria-pressed', String(TS.showMarkers));
     applyMarkers();
+    loadTradeLines();
+  });
+
+  // Retry buttons in error states.
+  Object.assign(RETRY, {
+    candles: () => loadCandles(), orderbook: loadOrderbook, economist: loadEconomist, news: loadNews,
+    pairs: loadPairs, freqtrade: loadFreqtradeTab, dex: loadDexTrades, overview: loadOverview,
+  });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-retry]');
+    if (b && RETRY[b.dataset.retry]) RETRY[b.dataset.retry]();
+  });
+
+  window.addEventListener('popstate', () => {
+    const view = location.hash.replace('#', '');
+    if (typeof switchView === 'function' && ['system', 'frequi'].includes(view)) return switchView(view, { history: false });
+    if (typeof switchView === 'function' && $('view-trading').classList.contains('hidden')) switchView('trading', { history: false });
+    applyRoute(parseRoute(location.hash));
   });
   $('btn-watchlist').addEventListener('click', () => setWatchlistVisible($('markets-layout').classList.contains('no-watchlist')));
 
@@ -737,12 +988,16 @@ function bindEvents() {
       e.preventDefault();
       pickerFocus = Math.max(0, Math.min(options.length - 1, pickerFocus + (e.key === 'ArrowDown' ? 1 : -1)));
       options.forEach((o, i) => o.classList.toggle('focused', i === pickerFocus));
-      if (options[pickerFocus]) options[pickerFocus].scrollIntoView({ block: 'nearest' });
+      if (options[pickerFocus]) {
+        options[pickerFocus].scrollIntoView({ block: 'nearest' });
+        $('pair-picker-search').setAttribute('aria-activedescendant', options[pickerFocus].id);
+      }
     } else if (e.key === 'Enter') {
       const pick = options[pickerFocus] || options[0];
       if (pick) selectPair(pick.dataset.symbol);
     } else if (e.key === 'Escape') {
       openPicker(false);
+      $('pair-picker-btn').focus();
     }
   });
   document.addEventListener('click', (e) => {
@@ -779,21 +1034,35 @@ async function init() {
   }
   TS.showMarkers = TS.settings.showTradeMarkers !== false;
   $('btn-markers').classList.toggle('active', TS.showMarkers);
+  $('btn-markers').setAttribute('aria-pressed', String(TS.showMarkers));
   Object.assign(TS.indicators, storage.get('indicators', {}));
-  document.querySelectorAll('[data-indicator]').forEach((b) => b.classList.toggle('active', !!TS.indicators[b.dataset.indicator]));
+  document.querySelectorAll('[data-indicator]').forEach((b) => {
+    b.classList.toggle('active', !!TS.indicators[b.dataset.indicator]);
+    b.setAttribute('aria-pressed', String(!!TS.indicators[b.dataset.indicator]));
+  });
   $('watchlist-category').value = storage.get('wlcat', 'ALL');
   setWatchlistVisible(storage.get('watchlist', true));
 
   await loadPairs();
+  // A link (#markets/<pair>/<tf>, #settings/providers, ...) wins over the stored view.
+  const route = parseRoute(location.hash);
   const saved = storage.get('symbol', null);
-  const symbol = [saved, TS.settings.defaultSymbol].find((s) => s && pairBySymbol(s)) || (TS.pairs[0] && TS.pairs[0].symbol);
-  TS.activeTf = storage.get('tf', TS.settings.defaultTimeframe || '15m');
-  document.querySelectorAll('#tf-group .tf-btn').forEach((b) => b.classList.toggle('active', b.dataset.tf === TS.activeTf));
+  const symbol = [route && route.symbol, saved, TS.settings.defaultSymbol].find((s) => s && pairBySymbol(s)) || (TS.pairs[0] && TS.pairs[0].symbol);
+  const tf = [route && route.tf, storage.get('tf', null), TS.settings.defaultTimeframe].find((t) => TIMEFRAMES.includes(t)) || '15m';
+  TS.activeTf = tf;
+  markTimeframe();
+  if (route && route.pane && TS.setSettingsPane) TS.setSettingsPane(route.pane);
+  routing = true;
   if (symbol) selectPair(symbol);
   else chartMessage('No instruments yet. Add one in Settings → Instruments.');
+  routing = false;
 
-  const tab = storage.get('tab', 'chart');
-  showTab(document.getElementById(`tab-${tab}`) ? tab : 'chart');
+  const tab = route ? route.tab : storage.get('tab', 'chart');
+  routing = true;
+  showTab(tab);
+  routing = false;
+  syncUrl(false);
+  setInterval(() => renderAges(), 1000);
   loadOverview();
   calculatePnL();
   initLogStream();

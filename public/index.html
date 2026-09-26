@@ -4,49 +4,53 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Trading Suite</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js" integrity="sha384-2Yiz1jBuc53MdRCA3ojcpk7cAoW2uFfKcetY6JKbqUetb537Hq2uPJrqM1Mj2AKx" crossorigin="anonymous"></script>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <meta name="color-scheme" content="dark">
+  <link rel="stylesheet" href="vendor/fontawesome/css/fontawesome.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/css/solid.min.css">
+  <link rel="stylesheet" href="vendor/fonts/inter/index.css">
+  <link rel="stylesheet" href="vendor/fonts/jetbrains-mono/index.css">
   <link rel="stylesheet" href="style.css">
+  <script src="vendor/lightweight-charts/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
   <!-- Unified shell: one entry point for the trading, system and FreqUI dashboards -->
   <div id="control-bar" class="control-bar">
     <nav class="shell-nav" aria-label="Dashboards">
-      <button type="button" class="view-btn active" data-view="trading"><i class="fa-solid fa-chart-line"></i> Trading</button>
-      <button type="button" class="view-btn" data-view="system"><i class="fa-solid fa-server"></i> System</button>
-      <button type="button" class="view-btn" data-view="frequi"><i class="fa-solid fa-robot"></i> FreqUI</button>
-      <a class="view-btn" href="../" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> OpenClaw</a>
+      <button type="button" class="view-btn active" data-view="trading" aria-label="Trading"><i class="fa-solid fa-chart-line" aria-hidden="true"></i><span class="lbl">Trading</span></button>
+      <button type="button" class="view-btn" data-view="system" aria-label="System"><i class="fa-solid fa-server" aria-hidden="true"></i><span class="lbl">System</span></button>
+      <button type="button" class="view-btn" data-view="frequi" aria-label="FreqUI"><i class="fa-solid fa-robot" aria-hidden="true"></i><span class="lbl">FreqUI</span></button>
+      <a class="view-btn" href="../" target="_blank" rel="noopener" aria-label="OpenClaw (new tab)"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i><span class="lbl">OpenClaw</span></a>
     </nav>
     <div id="halt-status" class="halt-status hidden"></div>
     <div id="engine-badges" class="engine-badges"><span class="engine-badge mode-unknown">Loading modes…</span></div>
-    <button type="button" id="kill-switch-btn" class="kill-btn" disabled><i class="fa-solid fa-power-off"></i> KILL SWITCH</button>
+    <button type="button" id="kill-switch-btn" class="kill-btn" disabled aria-label="Kill switch"><i class="fa-solid fa-power-off" aria-hidden="true"></i><span class="lbl">KILL SWITCH</span></button>
   </div>
 
   <div id="view-trading" class="app-view">
     <header>
       <div class="kpi-ribbon">
-        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div><div class="kpi-label">Realized PnL</div><div class="kpi-val" id="kpi-pnl">-</div></div></div>
-        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-wallet"></i></div><div><div class="kpi-label" id="kpi-capital-label">Capital</div><div class="kpi-val" id="kpi-capital">-</div></div></div>
-        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div><div><div class="kpi-label">Win rate</div><div class="kpi-val" id="kpi-winrate">-</div></div></div>
-        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-layer-group"></i></div><div><div class="kpi-label">Open trades</div><div class="kpi-val" id="kpi-open">-</div></div></div>
-        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-brain"></i></div><div><div class="kpi-label">Avg. economist score</div><div class="kpi-val" id="kpi-score">-</div></div></div>
-        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div><div><div class="kpi-label">Trading</div><div class="kpi-val" id="kpi-control">-</div></div></div>
+        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div><div class="kpi-label">Realized PnL</div><div class="kpi-val" id="kpi-pnl"><span class="skeleton sk-kpi"></span></div></div></div>
+        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-wallet"></i></div><div><div class="kpi-label" id="kpi-capital-label">Capital</div><div class="kpi-val" id="kpi-capital"><span class="skeleton sk-kpi"></span></div></div></div>
+        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-trophy"></i></div><div><div class="kpi-label">Win rate</div><div class="kpi-val" id="kpi-winrate"><span class="skeleton sk-kpi"></span></div></div></div>
+        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-layer-group"></i></div><div><div class="kpi-label">Open trades</div><div class="kpi-val" id="kpi-open"><span class="skeleton sk-kpi"></span></div></div></div>
+        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-brain"></i></div><div><div class="kpi-label">Avg. economist score</div><div class="kpi-val" id="kpi-score"><span class="skeleton sk-kpi"></span></div></div></div>
+        <div class="kpi-item"><div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div><div><div class="kpi-label">Trading</div><div class="kpi-val" id="kpi-control"><span class="skeleton sk-kpi"></span></div></div></div>
+        <span class="age kpi-age" data-age="overview"></span>
       </div>
-      <div class="nav-tabs" role="tablist">
-        <button class="tab-btn active" data-tab="chart"><i class="fa-solid fa-chart-column"></i> Markets</button>
-        <button class="tab-btn" data-tab="screener"><i class="fa-solid fa-list-check"></i> Screener</button>
-        <button class="tab-btn" data-tab="freqtrade"><i class="fa-solid fa-robot"></i> Freqtrade</button>
-        <button class="tab-btn" data-tab="dex"><i class="fa-solid fa-bolt"></i> Web3 DEX</button>
-        <button class="tab-btn" data-tab="settings"><i class="fa-solid fa-sliders"></i> Settings</button>
-        <button class="tab-btn" data-tab="logs"><i class="fa-solid fa-terminal"></i> Logs</button>
+      <div class="nav-tabs" role="tablist" aria-label="Trading views" id="nav-tabs">
+        <button type="button" class="tab-btn active" data-tab="chart" role="tab" id="tabbtn-chart" aria-controls="tab-chart" aria-selected="true" tabindex="0"><i class="fa-solid fa-chart-column" aria-hidden="true"></i> Markets</button>
+        <button type="button" class="tab-btn" data-tab="screener" role="tab" id="tabbtn-screener" aria-controls="tab-screener" aria-selected="false" tabindex="-1"><i class="fa-solid fa-list-check" aria-hidden="true"></i> Screener</button>
+        <button type="button" class="tab-btn" data-tab="freqtrade" role="tab" id="tabbtn-freqtrade" aria-controls="tab-freqtrade" aria-selected="false" tabindex="-1"><i class="fa-solid fa-robot" aria-hidden="true"></i> Freqtrade</button>
+        <button type="button" class="tab-btn" data-tab="dex" role="tab" id="tabbtn-dex" aria-controls="tab-dex" aria-selected="false" tabindex="-1"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Web3 DEX</button>
+        <button type="button" class="tab-btn" data-tab="settings" role="tab" id="tabbtn-settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Settings</button>
+        <button type="button" class="tab-btn" data-tab="logs" role="tab" id="tabbtn-logs" aria-controls="tab-logs" aria-selected="false" tabindex="-1"><i class="fa-solid fa-terminal" aria-hidden="true"></i> Logs</button>
       </div>
     </header>
 
     <main>
       <!-- Markets: watchlist | chart | side panel, all in one view -->
-      <section id="tab-chart" class="tab-content">
+      <section id="tab-chart" class="tab-content" role="tabpanel" aria-labelledby="tabbtn-chart">
         <div class="chart-toolbar">
           <div class="pair-picker" id="pair-picker">
             <button type="button" class="pair-picker-btn" id="pair-picker-btn" aria-haspopup="listbox" aria-expanded="false">
@@ -55,20 +59,20 @@
               <i class="fa-solid fa-chevron-down"></i>
             </button>
             <div class="pair-picker-menu hidden" id="pair-picker-menu">
-              <input type="search" id="pair-picker-search" placeholder="Search pairs…" autocomplete="off">
-              <div class="pair-picker-list" id="pair-picker-list" role="listbox"></div>
+              <input type="search" id="pair-picker-search" placeholder="Search pairs…" autocomplete="off" role="combobox" aria-controls="pair-picker-list" aria-expanded="true" aria-autocomplete="list" aria-label="Search pairs">
+              <div class="pair-picker-list" id="pair-picker-list" role="listbox" aria-label="Pairs"></div>
             </div>
           </div>
           <div class="price-now"><span id="active-price">-</span> <span id="active-change" class="change">-</span></div>
-          <div class="tf-btn-group" id="tf-group" aria-label="Timeframe"></div>
+          <div class="tf-btn-group" id="tf-group" role="group" aria-label="Timeframe"></div>
           <div class="tf-btn-group">
-            <button class="tf-btn" data-indicator="sma20">SMA 20</button>
-            <button class="tf-btn" data-indicator="sma50">SMA 50</button>
-            <button class="tf-btn" data-indicator="ema200">EMA 200</button>
-            <button class="tf-btn" id="btn-markers" title="Trade markers"><i class="fa-solid fa-location-dot"></i> Trades</button>
-            <button class="tf-btn" id="btn-watchlist" title="Show or hide the pair list"><i class="fa-solid fa-table-list"></i></button>
+            <button type="button" class="tf-btn" data-indicator="sma20" aria-pressed="false">SMA 20</button>
+            <button type="button" class="tf-btn" data-indicator="sma50" aria-pressed="false">SMA 50</button>
+            <button type="button" class="tf-btn" data-indicator="ema200" aria-pressed="false">EMA 200</button>
+            <button type="button" class="tf-btn" id="btn-markers" title="Trade markers and open-trade lines" aria-pressed="true"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Trades</button>
+            <button type="button" class="tf-btn" id="btn-watchlist" title="Show or hide the pair list" aria-label="Pair list" aria-pressed="true"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>
           </div>
-          <div class="source-note" id="chart-source">-</div>
+          <div class="source-note"><span id="chart-source">-</span> <span class="age" data-age="candles"></span></div>
         </div>
 
         <div class="markets-layout" id="markets-layout">
@@ -84,17 +88,18 @@
               </select>
             </div>
             <div class="watchlist-cols"><span>Pair</span><span>Price</span><span>24h</span></div>
-            <div class="watchlist-body" id="watchlist-body"></div>
+            <div class="watchlist-body" id="watchlist-body"><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div></div>
           </aside>
 
           <div class="card chart-card">
             <div id="chart-wrapper"></div>
+            <div id="chart-legend" class="chart-legend" aria-live="off"></div>
             <div id="chart-message" class="chart-message hidden"></div>
           </div>
 
           <aside class="side-panel">
             <details class="card" open>
-              <summary class="card-title"><i class="fa-solid fa-layer-group"></i> Order book <span class="muted" id="ob-provider"></span></summary>
+              <summary class="card-title"><i class="fa-solid fa-layer-group"></i> Order book <span class="muted" id="ob-provider"></span> <span class="age" data-age="orderbook"></span></summary>
               <div class="orderbook-panel">
                 <div class="ob-header"><span>Price</span><span class="r">Size</span><span class="r">Total</span></div>
                 <div id="ob-asks-container" class="ob-side asks"></div>
@@ -121,7 +126,7 @@
             </details>
 
             <details class="card">
-              <summary class="card-title"><i class="fa-solid fa-newspaper"></i> News</summary>
+              <summary class="card-title"><i class="fa-solid fa-newspaper"></i> News <span class="age" data-age="news"></span></summary>
               <div id="news-container" class="news-list"></div>
             </details>
 
@@ -146,10 +151,10 @@
       </section>
 
       <!-- Screener -->
-      <section id="tab-screener" class="tab-content hidden">
+      <section id="tab-screener" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-screener">
         <div class="card">
           <div class="card-header wrap">
-            <div class="card-title"><i class="fa-solid fa-list-check"></i> Instruments <span class="muted" id="screener-count"></span></div>
+            <div class="card-title"><i class="fa-solid fa-list-check"></i> Instruments <span class="muted" id="screener-count"></span> <span class="age" data-age="pairs"></span></div>
             <div class="toolbar-row">
               <div class="tf-btn-group" id="screener-cats"></div>
               <input type="search" id="screener-search" placeholder="Search symbol, exchange, provider…">
@@ -160,17 +165,17 @@
           <div class="table-container">
             <table>
               <thead><tr><th>Symbol</th><th>Category</th><th>Exchange</th><th>Provider</th><th class="r">Last price</th><th class="r">24h</th><th class="r">24h volume</th><th>Economist</th><th>Updated</th></tr></thead>
-              <tbody id="screener-tbody"></tbody>
+              <tbody id="screener-tbody"><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr></tbody>
             </table>
           </div>
         </div>
       </section>
 
       <!-- Freqtrade -->
-      <section id="tab-freqtrade" class="tab-content hidden">
+      <section id="tab-freqtrade" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-freqtrade">
         <div class="grid-2">
           <div class="card">
-            <div class="card-header"><div class="card-title"><i class="fa-solid fa-gear"></i> Bot configuration</div><span class="muted" id="ft-state"></span></div>
+            <div class="card-header"><div class="card-title"><i class="fa-solid fa-gear"></i> Bot configuration <span class="age" data-age="freqtrade"></span></div><span class="muted" id="ft-state"></span></div>
             <div id="ft-config" class="kv-grid muted">Loading…</div>
           </div>
           <div class="card">
@@ -185,7 +190,7 @@
           <div class="table-container">
             <table>
               <thead><tr><th>ID</th><th>Pair</th><th class="r">Open rate</th><th class="r">Current</th><th class="r">Stake</th><th class="r">Profit</th><th>Opened</th></tr></thead>
-              <tbody id="ft-open-tbody"></tbody>
+              <tbody id="ft-open-tbody"><tr class="sk-tr"><td colspan="7"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="7"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="7"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="7"><div class="skeleton sk-line"></div></td></tr></tbody>
             </table>
           </div>
         </div>
@@ -194,17 +199,17 @@
           <div class="table-container">
             <table>
               <thead><tr><th>ID</th><th>Pair</th><th class="r">Open</th><th class="r">Close</th><th class="r">Stake</th><th>Opened</th><th>Closed</th><th class="r">PnL</th><th>Exit</th><th>Status</th></tr></thead>
-              <tbody id="freqtrade-tbody"></tbody>
+              <tbody id="freqtrade-tbody"><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr></tbody>
             </table>
           </div>
         </div>
       </section>
 
       <!-- Web3 DEX -->
-      <section id="tab-dex" class="tab-content hidden">
+      <section id="tab-dex" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-dex">
         <div class="card">
           <div class="card-header">
-            <div class="card-title"><i class="fa-solid fa-bolt"></i> Web3 DEX executions</div>
+            <div class="card-title"><i class="fa-solid fa-bolt"></i> Web3 DEX executions <span class="age" data-age="dex"></span></div>
             <div class="toolbar-row">
               <a href="api/trading/export/trades?format=csv" download class="pill pill-green"><i class="fa-solid fa-file-csv"></i> CSV</a>
               <a href="api/trading/export/trades?format=json" download class="pill pill-blue"><i class="fa-solid fa-file-code"></i> JSON</a>
@@ -213,19 +218,19 @@
           <div class="table-container">
             <table>
               <thead><tr><th>ID</th><th>Time</th><th>Action</th><th>Token</th><th class="r">In</th><th class="r">Out</th><th class="r">Gas</th><th class="r">Net</th><th>Status</th></tr></thead>
-              <tbody id="dex-tbody"></tbody>
+              <tbody id="dex-tbody"><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr></tbody>
             </table>
           </div>
         </div>
       </section>
 
       <!-- Settings -->
-      <section id="tab-settings" class="tab-content hidden">
+      <section id="tab-settings" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-settings">
         <div class="settings-nav tf-btn-group" id="settings-nav">
-          <button class="tf-btn active" data-settings="general">General &amp; risk</button>
-          <button class="tf-btn" data-settings="providers">Data providers</button>
-          <button class="tf-btn" data-settings="instruments">Instruments</button>
-          <button class="tf-btn" data-settings="integrations">Integrations</button>
+          <button type="button" class="tf-btn active" data-settings="general">General &amp; risk</button>
+          <button type="button" class="tf-btn" data-settings="providers">Data providers</button>
+          <button type="button" class="tf-btn" data-settings="instruments">Instruments</button>
+          <button type="button" class="tf-btn" data-settings="integrations">Integrations</button>
         </div>
 
         <div class="settings-pane" id="settings-general">
@@ -288,7 +293,7 @@
       </section>
 
       <!-- Logs -->
-      <section id="tab-logs" class="tab-content hidden">
+      <section id="tab-logs" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-logs">
         <div class="card">
           <div class="card-header">
             <div class="card-title"><i class="fa-solid fa-terminal"></i> Web3 supervisor log (live)</div>
@@ -338,7 +343,7 @@
     </form>
   </div>
 
-  <div id="toast-container"></div>
+  <div id="toast-container" role="status" aria-live="polite"></div>
 
   <script src="shell.js"></script>
   <script src="app.js"></script>

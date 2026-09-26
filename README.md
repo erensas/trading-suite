@@ -16,6 +16,14 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
   - Instruments: add a pair, pick its provider and provider symbol, and activate or deactivate it.
   - Integrations: status of the database, Freqtrade API, Web3 heartbeat, system dashboard, providers and the price refresh.
 
+### Links and keyboard
+
+- The address bar holds the view: `#markets/<pair>/<timeframe>` (pair URL-encoded, e.g. `#markets/BTC%2FUSDT/1h`), `#screener`, `#freqtrade`, `#dex`, `#settings/<general|providers|instruments|integrations>`, `#logs`; the shell adds `#system` and `#frequi`. Back and Forward move between views and pairs.
+- `/` opens the pair picker; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
+- Every panel shows how old its data is; the label turns amber when an update failed or the data is older than expected, and failed panels have a Retry button.
+- Prices below 0.001 use subscript zeros (`0.0₅436` = 0.00000436); changes carry ▲ / ▼ as well as colour.
+- The chart legend shows OHLCV for the bar under the cursor. With "Trades" on, open Freqtrade trades on the pair are drawn as entry, stop-loss and liquidation lines.
+
 ## Data providers
 
 Instruments are routed to a row in `market_providers`; the row's `kind` picks an adapter in `lib/providers.js`:
@@ -51,6 +59,8 @@ A background job refreshes `last_price`, `change_24h_pct` and `volume_24h_usd` o
 
 - Every state-changing call except the simulated test order needs the `X-Trading-Control: 1` header and a same-origin `Origin`. This covers the kill switch, settings, providers and instruments.
 - The service connects to PostgreSQL over the Unix socket with peer authentication, so it needs no DB password.
+- Front-end libraries (Font Awesome, Lightweight Charts, Inter and JetBrains Mono) are npm dependencies served from `node_modules` under `/vendor`; the page loads nothing from other hosts, and the Content-Security-Policy allows only `'self'` for scripts, styles and fonts.
+- Changes to settings, providers and instruments are written to `suite_audit_log` with the caller's Tailscale login and device.
 - Freqtrade API credentials come from `~/.openclaw/credentials/freqtrade.env`.
 
 ## Database
@@ -60,6 +70,7 @@ Apply the migrations in order with `psql -d trade_db -f db/migrations/<file>`:
 - `001_trading_control.sql`: kill switch state, audit log, engine heartbeat.
 - `002_mark_synthetic_trade_logs.sql`: flags synthetic Web3 rows.
 - `003_market_providers.sql`: `market_providers`, provider columns on `instrument_registry`, `suite_settings`, default providers and routing.
+- `004_suite_audit_log.sql`: audit log of UI changes.
 
 ## Run and deploy
 

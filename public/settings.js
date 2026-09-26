@@ -97,9 +97,16 @@
   });
 
   // ---- panes ---------------------------------------------------------------------------
+  const PANES = ['general', 'providers', 'instruments', 'integrations'];
   function showPane(name) {
+    if (!PANES.includes(name)) name = 'general';
     pane = name;
-    document.querySelectorAll('#settings-nav [data-settings]').forEach((b) => b.classList.toggle('active', b.dataset.settings === name));
+    TS.settingsPane = name;
+    if (TS.syncUrl) TS.syncUrl(false);
+    document.querySelectorAll('#settings-nav [data-settings]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.settings === name);
+      b.setAttribute('aria-pressed', String(b.dataset.settings === name));
+    });
     document.querySelectorAll('.settings-pane').forEach((el) => el.classList.toggle('hidden', el.id !== `settings-${name}`));
     if (name === 'general') loadGeneral();
     if (name === 'providers') loadProviders();
@@ -113,6 +120,10 @@
   document.addEventListener('ts:tab', (e) => {
     if (e.detail === 'settings') showPane(pane);
   });
+  // Deep links (#settings/<pane>) set the pane before the tab opens.
+  TS.setSettingsPane = (name) => {
+    if (PANES.includes(name)) pane = name;
+  };
 
   // ---- general & risk -------------------------------------------------------------------
   async function loadGeneral() {

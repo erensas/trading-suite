@@ -206,6 +206,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `009_news.sql`: `news_feeds` (seven feeds), `news_items`. The older `market_news_cache` table is no longer read.
 - `010_trading_venues.sql`: `trading_venues`.
 - `011_portfolio_wallets_dex_pairs.sql`: `wallets`, `portfolio_accounts`, `portfolio_holdings`, `portfolio_snapshots`, `dex_pair_controls`.
+- `012_mark_mispriced_flashloan_signals.sql`: flags the Web3 scanner's flash-loan signals returning more than 5 % of their capital (81 mispriced rows from 2026-09-27) as `INVALID_SYNTHETIC`, after copying them to `trade_logs_synthetic_backup_20260927`; undo in the file.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 

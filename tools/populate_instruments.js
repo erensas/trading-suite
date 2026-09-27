@@ -265,11 +265,14 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
     return false;
   }
 
-  // A GeckoTerminal search on one network; waits out the rate limit a few times.
-  async function geckoSearch(gecko, query, network) {
+  // The pools of a token on one network: GeckoTerminal's token endpoint first, the search
+  // (which only prefers the network) when that lists nothing; the rate limit is waited out.
+  async function geckoTokenPools(gecko, address, network) {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await ctx.providers.call(gecko, 'search', query, { network });
+        const rows = await ctx.providers.call(gecko, 'tokenPools', network, address);
+        if (rows.length) return rows;
+        return await ctx.providers.call(gecko, 'search', address, { network });
       } catch (e) {
         if (!isRateLimit(e) || attempt >= RATE_LIMIT_RETRIES) throw e;
         const m = /retry in (\d+) s/.exec(e.message || '');
@@ -297,7 +300,7 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
         searched += 1;
         let rows;
         try {
-          rows = await geckoSearch(gecko, token.address, G);
+          rows = await geckoTokenPools(gecko, token.address, G);
         } catch (e) {
           notes.push(`C: ${SYM} on ${G}: ${e.message}`);
           continue;

@@ -46,9 +46,18 @@ function fakeCtx({ registry = [], listings = {}, providers, whitelist, geckoRows
   const ctx = {
     providers: {
       list: async () => providers,
-      call: async (p, method, q, opts = {}) => {
-        calls.search.push({ q, network: opts.network });
-        return method === 'search' ? geckoRows.filter((r) => r.query === q).map(({ query, ...r }) => r) : [];
+      call: async (p, method, ...args) => {
+        if (method === 'tokenPools') {
+          const [network, address] = args;
+          calls.search.push({ method, q: address, network });
+          return geckoRows.filter((r) => r.query === address && r.network === network && r.direct).map(({ query, direct, ...r }) => r);
+        }
+        if (method === 'search') {
+          const [q, opts = {}] = args;
+          calls.search.push({ method, q, network: opts.network });
+          return geckoRows.filter((r) => r.query === q).map(({ query, direct, ...r }) => r);
+        }
+        return [];
       },
     },
     instruments: {
@@ -164,7 +173,7 @@ test('phase B and C: core pools become one DEX instrument per pair with a source
     listings: { 'WETH/USDC': [{ provider_id: 5, provider_symbol: 'arc:0xodd', network: 'arc' }] },
     providers: PROVIDERS,
     geckoRows: [
-      { query: '0xpendle', network: 'eth', base: 'PENDLE', quote: 'WETH', provider_symbol: 'eth:0xp1', liquidity_usd: 3e6, name: 'PENDLE / WETH 0.3%' },
+      { query: '0xpendle', network: 'eth', base: 'PENDLE', quote: 'WETH', provider_symbol: 'eth:0xp1', liquidity_usd: 3e6, name: 'PENDLE / WETH 0.3%', direct: true },
       { query: '0xpendle', network: 'arbitrum', base: 'PENDLE', quote: 'WETH', provider_symbol: 'arbitrum:0xp2', liquidity_usd: 9e6, name: 'PENDLE / WETH' },
       { query: '0xarb', network: 'arbitrum', base: 'ARB', quote: 'USDC', provider_symbol: 'arbitrum:0xa2', liquidity_usd: 1e6, name: 'ARB / USDC' },
     ],
@@ -188,7 +197,11 @@ test('phase B and C: core pools become one DEX instrument per pair with a source
     'one instrument per token on its own network; WETH and USDC are skipped'
   );
   assert.deepEqual(f.lst.get('PENDLE/WETH').map((l) => l.provider_symbol), ['eth:0xp1'], 'the pool on the token network, not the bigger one elsewhere');
-  assert.deepEqual(f.calls.search, [{ q: '0xpendle', network: 'eth' }, { q: '0xarb', network: 'arbitrum' }], 'searches are restricted to the token network');
+  assert.deepEqual(
+    f.calls.search,
+    [{ method: 'tokenPools', q: '0xpendle', network: 'eth' }, { method: 'tokenPools', q: '0xarb', network: 'arbitrum' }, { method: 'search', q: '0xarb', network: 'arbitrum' }],
+    'the token endpoint on the token network first, the search only when it lists nothing'
+  );
   assert.equal(pop.counts.sources, 5);
 });
 

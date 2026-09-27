@@ -26,7 +26,7 @@ module.exports = function strategyRoutes({ strategies, backtests, identity, audi
 
   router.put('/api/strategies/:name', requireControl, byName, validate({ body: schemas.strategySource }), async (req, res) => {
     const { name } = req.valid.params;
-    const out = await strategies.save(name, req.valid.body.source, { actor: identity.actorLabel(req), description: req.valid.body.description });
+    const out = await strategies.save(name, req.valid.body.source, { actor: identity.actorLabel(req), description: req.valid.body.description, origin: req.valid.body.origin });
     if (out.changed) await audit(req, out.created ? 'create' : 'update', 'strategy', name, null, { sha: out.sha });
     res.json({ success: true, ...out });
   });

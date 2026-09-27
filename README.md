@@ -29,10 +29,20 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 - **Layouts** (`chart_layouts`): the indicator set is saved on the server. The default layout applies to every chart; "Only for this symbol" keeps a separate one for the current symbol, and unticking it goes back to the default. Volume on/off is part of the layout.
 - **Alerts** (bell button): price above/below, 24 h change above/below, or an indicator line above/below a level on a timeframe. Price and change alerts are checked after every price refresh, indicator alerts every 5 minutes on the last closed candle. One-off alerts switch off when they fire; repeating ones fire again after the condition was false once. Price alerts show as dotted lines on the chart. Fired alerts pop up as notifications and count on the bell until the alerts dialog is opened.
 
+### Pine editor
+
+The **Pine** button (or `P`) opens an editor under the chart. Scripts are stored in `pine_scripts` (migration 008, with four examples) and run in the browser on the chart's candles (`public/pine.js`), again on every refresh, symbol or timeframe change.
+
+- **Language**: a Pine Script v5 subset: `indicator()` / `strategy()`, variables with `=`, `:=`, `+=`, `var`, tuples (`[a, b] = ...`), `if` / `else if` / `else`, `for`, single- and multi-line functions (`=>`), the ternary operator, history (`x[1]`), inputs (`input`, `input.int/float/bool/string/source`), `ta.*` (sma, ema, rma, wma, hma, stdev, rsi, macd, bb, atr, tr, highest, lowest, change, mom, roc, crossover, crossunder, cross, stoch, cci, mfi, vwap, supertrend, dmi, obv, cum, barssince, valuewhen, rising, falling), `math.*`, `nz` / `na` / `fixnan`, `color.*`, `plot` (line, histogram, circles, per-bar colours), `plotshape`, `plotchar`, `hline`. The `ta.*` functions are tested against the chart indicators (same definitions as TradingView). Errors name the line and mark it in the editor. `bgcolor`, `fill`, labels and lines are ignored with a warning.
+- **Chart**: overlay scripts draw on the price pane, others get their own pane below the indicators; shapes and strategy trades are markers on the candles; the legend shows the plot values.
+- **Strategy tester**: `strategy.entry`, `strategy.close`, `strategy.close_all` and `strategy.exit` (stop and limit prices) fill at the next bar's open, one position at a time (reversals close and reopen), with the script's initial capital, order size and commission. It shows net profit, win rate, profit factor, drawdown, buy and hold, the open trade and the trade list.
+- **Inputs** are edited in the Inputs tab (kept per script in the browser).
+- **To Freqtrade** converts a strategy into a Freqtrade strategy class: variables become dataframe columns computed with the same definitions (checked against the interpreter on real candles), inputs become hyperopt parameters, `strategy.entry` / `strategy.close` under `if` blocks become entry and exit signals (opposite entries also exit), and plots go into `plot_config`. Bar-by-bar state (`var`, `:=`, `for`) is refused with the line; `strategy.exit` is reported, since stoploss and ROI stay for the user to set. The class is saved to the strategy library (`origin` pine) and checked, ready to edit or backtest.
+
 ### Links and keyboard
 
 - The address bar holds the view: `#markets/<pair>/<timeframe>` (pair URL-encoded, e.g. `#markets/BTC%2FUSDT/1h`), `#screener`, `#strategies/<bots|library|editor|backtests>`, `#freqtrade`, `#dex`, `#settings/<general|providers|instruments|integrations>`, `#logs`; the shell adds `#system` and `#frequi`. Back and Forward move between views and pairs.
-- Ctrl+K or `/` opens search, `I` the indicators; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
+- Ctrl+K or `/` opens search, `I` the indicators, `P` the Pine editor (Ctrl+Enter runs, Ctrl+S saves); arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
 - Every panel shows how old its data is; the label turns amber when an update failed or the data is older than expected, and failed panels have a Retry button.
 - Prices below 0.001 use subscript zeros (`0.0₅436` = 0.00000436); changes carry ▲ / ▼ as well as colour.
 - The chart legend shows OHLCV for the bar under the cursor. With "Trades" on, open Freqtrade trades on the pair are drawn as entry, stop-loss and liquidation lines.
@@ -134,6 +144,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `005_listings_watchlists.sql`: `instrument_listings` (several sources per instrument, copied from the old single provider), `watchlists` and `watchlist_items` with starter lists.
 - `006_chart_layouts_alerts.sql`: `chart_layouts`, `alerts`, `alert_events`.
 - `007_bots_strategies_backtests.sql`: `bots` (seeded with the main bot and the Web3 engine), `bot_events`, `strategies`, `strategy_versions`, `backtests`.
+- `008_pine_scripts.sql`: `pine_scripts` with four examples.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 
@@ -146,7 +157,7 @@ src/context.js            builds the services (tests replace any of them)
 src/app.js                Express app: middleware, static files, routes, error handler
 src/http/                 security headers, request ids and logging, validation, control guard, errors
 src/schemas.js            zod schemas for every request body and query
-src/routes/               one file per area (health, settings, providers, market, instruments, charts, reports, integrations, control, strategies, bots)
+src/routes/               one file per area (health, settings, providers, market, instruments, charts, reports, integrations, control, strategies, bots, pine)
 src/services/             database and upstream access (providers, instruments, market data, reports, control, Freqtrade, identity, audit,
                           sysd = systemctl --user and transient units, strategies, backtests, bots)
 src/jobs/                 ticker refresh, halt guard, interval runner
@@ -156,7 +167,7 @@ systemd/                  unit template for managed bots, drop-ins for freqtrade
 lib/providers.js          provider adapters
 lib/resilience.js         rate limit and circuit breaker
 db/migrate.js             migration runner
-public/                   front end
+public/                   front end (indicators.js and pine.js are shared with the tests)
 test/                     node:test suites (unit, http, db)
 ```
 

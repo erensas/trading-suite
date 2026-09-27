@@ -16,6 +16,7 @@ Usage: strategy_check.py <strategy_dir> <StrategyName> [--static-only]
 """
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -114,6 +115,8 @@ def run(strategy_dir, class_name, static_only=False):
 
     from freqtrade.resolvers import StrategyResolver
 
+    # Freqtrade refuses a short strategy in spot markets, so those are checked as futures.
+    shorts = bool(re.search(r"^\s*can_short\s*=\s*True", source, re.M))
     config = {
         "strategy": class_name,
         "strategy_path": strategy_dir,
@@ -121,9 +124,9 @@ def run(strategy_dir, class_name, static_only=False):
         "stake_currency": "USDT",
         "stake_amount": 100,
         "dry_run": True,
-        "trading_mode": "spot",
-        "margin_mode": "",
-        "exchange": {"name": "binance", "pair_whitelist": ["BTC/USDT"], "pair_blacklist": []},
+        "trading_mode": "futures" if shorts else "spot",
+        "margin_mode": "isolated" if shorts else "",
+        "exchange": {"name": "binance", "pair_whitelist": ["BTC/USDT:USDT" if shorts else "BTC/USDT"], "pair_blacklist": []},
         "pairlists": [{"method": "StaticPairList"}],
         "entry_pricing": {"price_side": "same"},
         "exit_pricing": {"price_side": "same"},
@@ -139,7 +142,7 @@ def run(strategy_dir, class_name, static_only=False):
         "startup_candle_count": getattr(strategy, "startup_candle_count", 0),
     })
     df = synthetic_candles()
-    meta = {"pair": "BTC/USDT"}
+    meta = {"pair": "BTC/USDT:USDT" if shorts else "BTC/USDT"}
     df = strategy.populate_indicators(df, meta)
     df = strategy.populate_entry_trend(df, meta)
     df = strategy.populate_exit_trend(df, meta)

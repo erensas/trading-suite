@@ -181,7 +181,9 @@ function createBots({ db, sysd, strategies, control, freqtrade, config, log, fre
   function writeConfig(bot, cfg) {
     const backups = path.join(B.dir, 'config-backups');
     fs.mkdirSync(backups, { recursive: true });
-    fs.copyFileSync(bot.config_path, path.join(backups, `${bot.name}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`));
+    const copy = path.join(backups, `${bot.name}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    fs.copyFileSync(bot.config_path, copy);
+    fs.chmodSync(copy, 0o600);
     fs.writeFileSync(bot.config_path, JSON.stringify(cfg, null, 2) + '\n');
   }
 
@@ -339,8 +341,11 @@ function createBots({ db, sysd, strategies, control, freqtrade, config, log, fre
     }
     const cfg = readConfig(bot);
     const before = cfg.strategy;
+    const pathBefore = cfg.strategy_path;
     cfg.strategy = strategy;
+    // Library strategies load from the library; the main bot's own files from its default folder.
     if (loc.inLibrary) cfg.strategy_path = strategies.libDir;
+    else delete cfg.strategy_path;
     writeConfig(bot, cfg);
     const client = clientFor(bot);
     let open = [];
@@ -355,6 +360,8 @@ function createBots({ db, sysd, strategies, control, freqtrade, config, log, fre
     if (now && now.strategy !== strategy) {
       // Put the old config back so file and process agree.
       cfg.strategy = before;
+      if (pathBefore) cfg.strategy_path = pathBefore;
+      else delete cfg.strategy_path;
       writeConfig(bot, cfg);
       await client.api('POST', '/reload_config').catch(() => {});
       throw new ApiError(502, `${name} did not load ${strategy} (it reports ${now.strategy}); the previous config is back`, { code: 'reload_failed' });

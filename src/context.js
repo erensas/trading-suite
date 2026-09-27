@@ -20,6 +20,7 @@ const { createSysd } = require('./services/sysd');
 const { createStrategies } = require('./services/strategies');
 const { createBacktests } = require('./services/backtests');
 const { createBots } = require('./services/bots');
+const { createPineScripts } = require('./services/pine');
 const { createTickerRefresh } = require('./jobs/ticker-refresh');
 const { requireControl } = require('./http/middleware');
 
@@ -62,6 +63,7 @@ function createContext(overrides = {}) {
   make('strategies', () => createStrategies(ctx));
   make('backtests', () => createBacktests(ctx));
   make('bots', () => createBots(ctx));
+  make('pineScripts', () => createPineScripts(ctx));
   make('reports', () => createReports(ctx));
   make('tickerRefresh', () => createTickerRefresh(ctx));
   // Price alerts are checked against the prices each refresh has just written.

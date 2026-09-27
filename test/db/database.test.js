@@ -634,3 +634,38 @@ test('phases C to E: strategy library, backtests, bots, kill switch, going live'
   const audit = (await db.query("SELECT action, entity FROM suite_audit_log WHERE entity LIKE 'bot%' OR entity = 'strategy' ORDER BY id")).rows.map((a) => `${a.action} ${a.entity}`);
   assert.ok(audit.includes('import strategy') && audit.includes('go live bot') && audit.includes('delete bot'));
 });
+
+test('phase F: Pine scripts with seeded examples', { skip }, async (t) => {
+  await resetSchema();
+  await withClient((c) => migrate.up(c, migrate.readMigrations(), quiet));
+  const log = createLogger('silent');
+  const db = createPool({ connectionString: URL_, max: 2, statementTimeoutMs: 3000 }, log);
+  const app = await startApp({ db, freqtrade: fakeFreqtrade({}) });
+  t.after(async () => {
+    await app.close();
+    await db.end();
+  });
+  const Pine = require('../../public/pine');
+  const list = (await app.request('GET', '/api/pine/scripts')).json.scripts;
+  assert.equal(list.filter((s) => s.example).length, 4);
+  // Every example parses, and the strategies convert.
+  for (const s of list) {
+    const src = (await app.request('GET', `/api/pine/scripts/${s.id}`)).json.script.source;
+    const ast = Pine.parse(src);
+    assert.equal(ast.version, 5);
+    if (/strategy\(/.test(src)) assert.match(Pine.toFreqtrade(src, { className: 'ExampleCheck' }).source, /class ExampleCheck\(IStrategy\)/);
+  }
+  const big = 'x'.repeat(100 * 1024); // above the 64 KB limit of other routes
+  const created = await app.request('POST', '/api/pine/scripts', { control: true, body: { name: 'Mine', source: `//@version=5\nindicator('m')\n// ${big}` } });
+  assert.equal(created.status, 200, created.text);
+  assert.equal((await app.request('POST', '/api/pine/scripts', { control: true, body: { name: 'Mine', source: 'x' } })).status, 409);
+  assert.equal((await app.request('POST', '/api/pine/scripts', { control: true, body: { name: '', source: 'x' } })).status, 400);
+  const id = created.json.script.id;
+  const upd = await app.request('PUT', `/api/pine/scripts/${id}`, { control: true, body: { name: 'Mine 2' } });
+  assert.equal(upd.json.script.name, 'Mine 2');
+  assert.match((await app.request('GET', `/api/pine/scripts/${id}`)).json.script.source, /indicator\('m'\)/);
+  assert.equal((await app.request('DELETE', `/api/pine/scripts/${id}`, { control: true })).status, 200);
+  assert.equal((await app.request('GET', `/api/pine/scripts/${id}`)).status, 404);
+  const audit = (await db.query("SELECT action FROM suite_audit_log WHERE entity = 'pine script' ORDER BY id")).rows.map((r) => r.action);
+  assert.deepEqual(audit, ['create', 'update', 'delete']);
+});

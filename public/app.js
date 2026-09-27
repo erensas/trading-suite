@@ -231,7 +231,7 @@ function renderLegend(bar, param) {
     <span>L <b class="${cls}">${fmtPrice(full.low)}</b></span><span>C <b class="${cls}">${fmtPrice(full.close)}</b></span>
     ${chg === null ? '' : `<span class="${cls}">${fmtPct(chg)}</span>`}
     ${full.volume ? `<span>V <b>${fmtCompact(full.volume)}</b></span>` : ''}
-    ${TS.studies ? TS.studies.legend(param) : ''}`;
+    ${TS.studies ? TS.studies.legend(param) : ''}${TS.pine ? TS.pine.legend(param) : ''}`;
 }
 
 // Entry, stop-loss and liquidation lines of open Freqtrade trades on the active pair.

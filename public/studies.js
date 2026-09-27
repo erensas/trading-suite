@@ -34,6 +34,8 @@
   // Rebuilds every indicator series (after a layout change).
   function rebuild() {
     if (!TS.chart) return;
+    // The Pine layer sits below the indicator panes: take it off and put it back after them.
+    if (TS.pine) TS.pine.detach();
     clear();
     let pane = 0;
     for (const ind of TS.layout.indicators) {
@@ -59,6 +61,7 @@
     TS.chart.applyOptions({ height: wrapper.clientHeight });
     const panes = TS.chart.panes();
     for (let i = 1; i < panes.length; i++) panes[i].setHeight(PANE_HEIGHT);
+    if (TS.pine) TS.pine.attach();
     update();
     $('studies-count').textContent = TS.layout.indicators.length ? String(TS.layout.indicators.length) : '';
   }
@@ -75,6 +78,7 @@
       for (const [key, s] of Object.entries(l.series)) s.setData(out[key] || []);
     }
     TS.refreshVolume();
+    if (TS.pine) TS.pine.onCandles();
     drawAlertLines();
     TS.renderLegend();
   }

@@ -4,7 +4,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const esc = (v) => escapeHtml(v);
-  const { fmtPct, fmtTime, ago, fmtCompact } = TS.fmt;
+  const { fmtPct, fmtTime, ago } = TS.fmt;
   const { changeClass } = TS.util;
   const PANES = ['bots', 'library', 'editor', 'backtests'];
   const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'];
@@ -1188,5 +1188,5 @@ class ${name}(IStrategy):
     { label: 'Strategies: new strategy', icon: 'fa-plus', keywords: 'python create', run: () => (TS.showTab('strategies'), setPane('library'), openNewStrategy()) },
     { label: 'Backtests', icon: 'fa-flask', keywords: 'backtest results', run: () => (TS.showTab('strategies'), setPane('backtests')) }
   );
-  TS.strategies = { loadBots, openBot, openNewBot, loadLibrary, prefillBacktest, openBacktest, setPane, fmtCompact };
+  TS.strategies = { loadBots, openBot, openNewBot, loadLibrary, prefillBacktest, openBacktest, setPane, editStrategy: (name) => editStrategy(name) };
 })();

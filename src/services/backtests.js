@@ -140,7 +140,7 @@ function createBacktests({ db, sysd, strategies, config, log }) {
     const datadir = path.join(config.bots.dir, 'data', p.exchange);
     const start = new Date(Date.now() - p.days * 86400000);
     // Extra history so indicators with long look-backs are warmed up at the start.
-    const warmupDays = Math.ceil((300 * TF_MINUTES[tf]) / 1440) + 1;
+    const warmupDays = Math.ceil((500 * TF_MINUTES[tf]) / 1440) + 1;
     const dlStart = new Date(start.getTime() - warmupDays * 86400000);
     const ft = config.bots.freqtradeBin;
     const logs = [];

@@ -66,6 +66,7 @@
           <div class="tf-btn-group" id="tf-group" role="group" aria-label="Timeframe"></div>
           <div class="tf-btn-group">
             <button type="button" class="tf-btn" id="btn-studies" title="Indicators (I)" aria-haspopup="dialog"><i class="fa-solid fa-wave-square" aria-hidden="true"></i> Indicators <span class="count-badge" id="studies-count"></span></button>
+            <button type="button" class="tf-btn" id="btn-pine" title="Pine editor (P)" aria-controls="pine-panel" aria-expanded="false"><i class="fa-solid fa-code" aria-hidden="true"></i> Pine</button>
             <button type="button" class="tf-btn" id="btn-alerts" title="Alerts" aria-haspopup="dialog"><i class="fa-solid fa-bell" aria-hidden="true"></i> Alerts <span class="count-badge alert-badge hidden" id="alerts-badge"></span></button>
             <button type="button" class="tf-btn" id="btn-markers" title="Trade markers and open-trade lines" aria-pressed="true"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Trades</button>
             <button type="button" class="tf-btn" id="btn-watchlist" title="Show or hide the pair list" aria-label="Pair list" aria-pressed="true"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>
@@ -93,6 +94,34 @@
             <div id="chart-wrapper"></div>
             <div id="chart-legend" class="chart-legend" aria-live="off"></div>
             <div id="chart-message" class="chart-message hidden"></div>
+            <section id="pine-panel" class="pine-panel hidden" aria-label="Pine editor">
+              <div class="pine-head">
+                <select id="pine-select" aria-label="Pine script"></select>
+                <span class="muted small" id="pine-state"></span>
+                <span class="spacer"></span>
+                <button type="button" class="icon-btn" id="pine-new" title="New script"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i> New</button>
+                <button type="button" class="icon-btn" id="pine-save" title="Save (Ctrl+S)"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save</button>
+                <button type="button" class="icon-btn" id="pine-save-as" title="Save as a new script"><i class="fa-solid fa-copy" aria-hidden="true"></i> Save as</button>
+                <button type="button" class="icon-btn danger" id="pine-delete" title="Delete the script"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                <label class="check small" title="Draw the script's plots and trades on the chart and re-run it on new candles"><input type="checkbox" id="pine-on-chart" checked> On chart</label>
+                <button type="button" class="btn-buy small-btn" id="pine-run" title="Run (Ctrl+Enter)"><i class="fa-solid fa-play" aria-hidden="true"></i> Run</button>
+                <button type="button" class="btn-secondary small-btn" id="pine-export" title="Convert the strategy into a Freqtrade strategy"><i class="fa-solid fa-right-left" aria-hidden="true"></i> To Freqtrade</button>
+                <button type="button" class="icon-btn" id="pine-close" aria-label="Close the Pine editor"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+              </div>
+              <div class="pine-body">
+                <div id="pine-editor" class="pine-editor"></div>
+                <div class="pine-side">
+                  <div class="tf-btn-group" id="pine-tabs" role="group" aria-label="Pine output">
+                    <button type="button" class="tf-btn active" data-pine-tab="output" aria-pressed="true">Output</button>
+                    <button type="button" class="tf-btn" data-pine-tab="inputs" aria-pressed="false">Inputs <span class="count-badge" id="pine-inputs-count"></span></button>
+                    <button type="button" class="tf-btn" data-pine-tab="strategy" aria-pressed="false">Strategy tester</button>
+                  </div>
+                  <div class="pine-pane" id="pine-output" role="log" aria-live="polite"></div>
+                  <form class="pine-pane hidden" id="pine-inputs"></form>
+                  <div class="pine-pane hidden" id="pine-strategy"></div>
+                </div>
+              </div>
+            </section>
           </div>
 
           <aside class="side-panel">
@@ -628,6 +657,23 @@
     </form>
   </div>
 
+  <!-- Pine strategy to Freqtrade -->
+  <div id="pine-export-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pine-export-title">
+    <form class="modal-card xwide" id="pine-export-form">
+      <div class="modal-head-row"><div id="pine-export-title" class="modal-title">Convert to a Freqtrade strategy</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="toolbar-row">
+        <label class="inline-label">Class name<input name="pyclass" required pattern="[A-Za-z_][A-Za-z0-9_]{2,60}"></label>
+        <label class="inline-label">Timeframe<select name="timeframe"></select></label>
+        <button type="button" class="btn-secondary" id="pine-export-refresh">Convert again</button>
+      </div>
+      <div id="pine-export-warnings"></div>
+      <pre id="pine-export-code" class="code-preview"></pre>
+      <div class="hint">Variables become columns, inputs become hyperopt parameters, and strategy.entry / strategy.close become entry and exit signals (Freqtrade also enters at the next candle's open). Stoploss and ROI are not converted: the class starts with a 10 % stoploss and no ROI exits; adjust them in the strategy editor. The strategy is saved to the library and checked.</div>
+      <div id="pine-export-error" class="form-error hidden"></div>
+      <div class="modal-actions" id="pine-export-actions"><button type="button" class="btn-secondary" data-close-modal>Cancel</button><button type="submit" class="btn-buy"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save to the library and check</button></div>
+    </form>
+  </div>
+
   <div id="toast-container" role="status" aria-live="polite"></div>
 
   <script src="shell.js"></script>
@@ -638,6 +684,9 @@
   <script src="settings.js"></script>
   <script src="vendor/codemirror/lib/codemirror.js"></script>
   <script src="vendor/codemirror/mode/python/python.js"></script>
+  <script src="vendor/codemirror/addon/mode/simple.js"></script>
   <script src="strategies.js"></script>
+  <script src="pine.js"></script>
+  <script src="pine-ui.js"></script>
 </body>
 </html>

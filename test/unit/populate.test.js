@@ -1,6 +1,7 @@
 // tools/populate_instruments.js: symbol helpers and the phases on fake services.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+process.env.POPULATE_GECKO_PACE_MS = '0'; // no pacing between the fake GeckoTerminal searches
 const { createPopulator, poolSymbol, dexFamily, pickTokenPool, geckoNetwork, networkOrder, parseArgs } = require('../../tools/populate_instruments');
 
 test('helpers: pool symbols, dex families, networks, options', () => {
@@ -36,14 +37,20 @@ test('pickTokenPool: same network, WETH or stablecoin quote first, then liquidit
 
 // In-memory stand-ins for the services the tool uses.
 function fakeCtx({ registry = [], listings = {}, providers, whitelist, geckoRows = [], candidates = {} } = {}) {
-  const calls = { create: [], addListing: [], addItem: [], reorder: [], update: [], sql: [] };
+  const calls = { create: [], addListing: [], addItem: [], reorder: [], update: [], sql: [], search: [] };
   const rows = new Map(registry.map((r) => [r.symbol, { ...r }]));
   const lst = new Map(Object.entries(listings).map(([s, l]) => [s, l.map((x, i) => ({ id: i + 1, priority: i, enabled: true, ...x }))]));
   let nextId = 100;
   const items = { Main: [], 'Crypto spot': [], 'Crypto futures': [], 'DEX pools': [] };
   const wl = Object.keys(items).map((name, i) => ({ id: i + 1, name }));
   const ctx = {
-    providers: { list: async () => providers, call: async (p, method, q) => (method === 'search' ? geckoRows.filter((r) => r.query === q).map(({ query, ...r }) => r) : []) },
+    providers: {
+      list: async () => providers,
+      call: async (p, method, q, opts = {}) => {
+        calls.search.push({ q, network: opts.network });
+        return method === 'search' ? geckoRows.filter((r) => r.query === q).map(({ query, ...r }) => r) : [];
+      },
+    },
     instruments: {
       list: async () => [...rows.values()],
       listings: async (symbol) => lst.get(symbol) || [],
@@ -181,6 +188,7 @@ test('phase B and C: core pools become one DEX instrument per pair with a source
     'one instrument per token on its own network; WETH and USDC are skipped'
   );
   assert.deepEqual(f.lst.get('PENDLE/WETH').map((l) => l.provider_symbol), ['eth:0xp1'], 'the pool on the token network, not the bigger one elsewhere');
+  assert.deepEqual(f.calls.search, [{ q: '0xpendle', network: 'eth' }, { q: '0xarb', network: 'arbitrum' }], 'searches are restricted to the token network');
   assert.equal(pop.counts.sources, 5);
 });
 

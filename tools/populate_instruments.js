@@ -43,7 +43,14 @@ const WRAPPED_NATIVE = new Set(['WETH', 'WBNB', 'WMATIC', 'WPOL', 'WAVAX', 'WFTM
 const PREFERRED_QUOTES = new Set(['WETH', 'ETH', ...STABLES]);
 const RENAMABLE_BASES = new Set(['ETH', 'BTC', 'SOL', 'BNB']);
 
+// Phase C pacing: the suite's own price refresh shares GeckoTerminal's per-IP budget with
+// this tool, so token searches are spaced out and a 429 is waited out, not given up on.
+const TOKEN_SEARCH_PACE_MS = Number(process.env.POPULATE_GECKO_PACE_MS || 8000);
+const RATE_LIMIT_RETRIES = 3;
+
 const upper = (s) => String(s || '').toUpperCase();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isRateLimit = (e) => !!e && (e.code === 'rate_limited' || e.upstreamStatus === 429 || /\b429\b|rate limit/i.test(e.message || ''));
 
 // A pool's two tokens as an instrument symbol: the non-stable token is the base.
 function poolSymbol(token0, token1) {
@@ -258,9 +265,25 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
     return false;
   }
 
+  // A GeckoTerminal search on one network; waits out the rate limit a few times.
+  async function geckoSearch(gecko, query, network) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await ctx.providers.call(gecko, 'search', query, { network });
+      } catch (e) {
+        if (!isRateLimit(e) || attempt >= RATE_LIMIT_RETRIES) throw e;
+        const m = /retry in (\d+) s/.exec(e.message || '');
+        const wait = (m ? Number(m[1]) : 60) * 1000 + 5000;
+        say('C', `GeckoTerminal rate limit; waiting ${Math.round(wait / 1000)} s`);
+        await sleep(wait);
+      }
+    }
+  }
+
   async function phaseC(web3) {
     const gecko = provider('geckoterminal');
     if (!web3 || !gecko) return;
+    let searched = 0;
     for (const network of networkOrder(web3.tokens)) {
       const G = geckoNetwork(network);
       for (const [sym, token] of Object.entries(web3.tokens[network] || {})) {
@@ -270,9 +293,11 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
           say('C', `= ${SYM} on ${G} already has a source`);
           continue;
         }
+        if (searched) await sleep(TOKEN_SEARCH_PACE_MS);
+        searched += 1;
         let rows;
         try {
-          rows = await ctx.providers.call(gecko, 'search', token.address);
+          rows = await geckoSearch(gecko, token.address, G);
         } catch (e) {
           notes.push(`C: ${SYM} on ${G}: ${e.message}`);
           continue;

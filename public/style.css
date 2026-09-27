@@ -517,3 +517,19 @@ tr.selected td { background: var(--tint-accent); }
 .pool-flow .buy { height: 100%; background: var(--pos); }
 .ob-pool .ob-row { grid-template-columns: 1fr 1fr 1fr; }
 .ob-pool .ob-header { grid-template-columns: 1fr 1fr 1fr; }
+
+/* Portfolio tab */
+.pf-chart { height: 180px; margin-top: 12px; }
+.pf-form select[hidden] { display: none; }
+.phrase-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+.phrase-word { background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; font-family: 'JetBrains Mono Variable', ui-monospace, monospace; font-size: 13px; }
+.phrase-word .muted { display: inline-block; min-width: 1.6em; font-size: 11px; }
+.wl-nets { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+label.inline, .modal-card label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; }
+
+/* Web3 DEX pair switches */
+.switch, label.switch { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; margin: 0; }
+.switch input:checked + span { color: var(--pos); font-weight: 700; }
+.switch input:not(:checked) + span { color: var(--muted); }
+.pf-stack { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+label.inline input, label.switch input { width: auto; }

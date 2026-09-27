@@ -255,7 +255,21 @@ const capitalLimit = z.object({ amount: z.coerce.number().positive().max(1e7) })
 const venueRef = z.object({ venueId: z.coerce.number().int().positive() });
 const backtestsQuery = z.object({ strategy: z.string().regex(STRATEGY_NAME).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
 
+// ---- portfolio and Web3 pair controls -----------------------------------------------------
+const portfolioQuery = z.object({ days: z.coerce.number().int().min(1).max(365).default(90) });
+const dexPairsQuery = z.object({ network: z.string().regex(/^[a-z0-9_-]{1,40}$/, 'network: a name such as ethereum').optional() });
+const dexPairFlags = z.object({ arbitrage_enabled: boolish.optional(), flashloan_enabled: boolish.optional() });
+const dexPairsBulk = dexPairFlags.extend({
+  ids: z.array(z.coerce.number().int().positive()).min(1).max(500).optional(),
+  network: z.string().regex(/^[a-z0-9_-]{1,40}$/, 'network: a name such as ethereum').optional(),
+  all: boolish.optional(),
+});
+
 module.exports = {
+  portfolioQuery,
+  dexPairsQuery,
+  dexPairFlags,
+  dexPairsBulk,
   strategyParam,
   botParam,
   strategySource,

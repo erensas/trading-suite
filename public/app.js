@@ -156,7 +156,7 @@ TS.util = { storage, changeClass, pairBySymbol, CATEGORY_LABELS, CATEGORY_PILL }
 // Each loader reports success (markFresh) or failure (markError); every [data-age] label
 // shows how old its data is and turns amber once it is older than expected.
 const FRESH = {};
-const STALE_AFTER_S = { candles: 60, orderbook: 20, pairs: 120, overview: 60, freqtrade: 40, dex: 40, news: 900, economist: 900 };
+const STALE_AFTER_S = { candles: 60, orderbook: 20, pairs: 120, overview: 60, freqtrade: 40, dex: 40, news: 900, economist: 900, portfolio: 7200, dexpairs: 120 };
 const RETRY = {};
 
 function shortAge(seconds) {
@@ -189,6 +189,7 @@ function renderAges(only) {
   });
 }
 const retryButton = (key) => `<button type="button" class="icon-btn" data-retry="${key}"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry</button>`;
+TS.fresh = { markFresh, markError, retryButton, retry: RETRY };
 
 function showToast(title, message, type = 'info') {
   const container = $('toast-container');
@@ -531,10 +532,10 @@ function markTimeframe() {
 }
 
 // ---- URL state ------------------------------------------------------------------------
-// #markets/<pair>/<tf>, #screener, #strategies/<pane>, #freqtrade, #dex, #settings/<pane>, #logs. The shell
+// #markets/<pair>/<tf>, #screener, #portfolio, #strategies/<pane>, #freqtrade, #dex, #settings/<pane>, #logs. The shell
 // owns #system and #frequi. Tab and pair changes add a history entry (Back works), a
 // timeframe change replaces it.
-const ROUTE_OF_TAB = { chart: 'markets', screener: 'screener', strategies: 'strategies', freqtrade: 'freqtrade', dex: 'dex', settings: 'settings', logs: 'logs' };
+const ROUTE_OF_TAB = { chart: 'markets', screener: 'screener', portfolio: 'portfolio', strategies: 'strategies', freqtrade: 'freqtrade', dex: 'dex', settings: 'settings', logs: 'logs' };
 const TAB_OF_ROUTE = Object.fromEntries(Object.entries(ROUTE_OF_TAB).map(([t, r]) => [r, t]));
 let routing = false;
 

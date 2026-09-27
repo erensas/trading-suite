@@ -8,9 +8,10 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 
 - **Markets**: watchlist, chart and side panel in one view. The watchlist panel switches between named lists (see below); the chart shows candles and volume from the instrument's data sources, overlays, and Freqtrade, Web3 and test-order markers. The side panel holds the order book (where a source has one), a simulated test order, the economist signal, news and a risk calculator.
 - **Screener**: every active instrument with price, 24 h change and volume, provider and economist score. Click a row to chart it.
+- **Portfolio**: what the accounts are worth, real and paper, with the history of the totals; accounts, assets across accounts, and EVM wallets (see [Portfolio and wallets](#portfolio-and-wallets)).
 - **Strategies**: every bot with its mode (dry-run or live), state and strategy; managed Freqtrade bots; the strategy library with checks, an editor and backtests (see [Strategy center](#strategy-center)).
 - **Freqtrade**: live bot configuration, performance, whitelist and open trades from the Freqtrade API, plus trade history from `trade_db`.
-- **Web3 DEX** and **Logs**: Web3 executions and the live Web3 supervisor log. CEX trading is the Freqtrade view.
+- **Web3 DEX** and **Logs**: the pairs the Web3 engine scans, with arbitrage and flash loans switched on or off per pair (see [Web3 pair switches](#web3-pair-switches)), Web3 executions, and the live Web3 supervisor log. CEX trading is the Freqtrade view.
 - **Settings**:
   - General and risk settings, stored in `suite_settings`.
   - Data providers: add, edit, test or disable a provider.
@@ -54,6 +55,44 @@ The **Pine** button (or `P`) opens an editor under the chart. Scripts are stored
 - Every panel shows how old its data is; the label turns amber when an update failed or the data is older than expected, and failed panels have a Retry button.
 - Prices below 0.001 use subscript zeros (`0.0₅436` = 0.00000436); changes carry ▲ / ▼ as well as colour.
 - The chart legend shows OHLCV for the bar under the cursor. With "Trades" on, open Freqtrade trades on the pair are drawn as entry, stop-loss and liquidation lines.
+
+## Portfolio and wallets
+
+The Portfolio tab (`#portfolio`, migration 011) values **accounts** in USD and keeps the totals over time.
+
+- **Manual holdings**: positions entered by hand, registered instruments (stocks, ETFs, coins; Ctrl+K adds one) and cash, with an optional cost basis for P/L. An account is **real** or **paper**, so a paper portfolio can be tracked next to real money.
+- **Alpaca paper**: a venue from Settings → Trading venues; equity, cash and positions from Alpaca's paper API (always paper).
+- **Freqtrade bot**: the main bot or a managed one; its wallet from `/balance`, paper while it runs dry.
+- **Wallet**: an EVM wallet below; the native coin, the stablecoins and the token of every DEX instrument with a contract on the wallet's networks, read with JSON-RPC (`eth_getBalance`, `balanceOf`, `decimals`, one batch per network) from public endpoints (publicnode, then the chain's own; `EVM_RPC_<NETWORK>` in the environment puts others first, https only).
+
+Prices come from the instrument registry (the ticker refresh keeps `last_price` current): an instrument by its symbol and quote, a coin against a USD stablecoin, a token by its contract on the network; stablecoins count as 1 USD, wrapped and staked coins as their underlying. A position without a USD price stays listed and is marked. **Refresh values** values every enabled account; the job does it every hour (`PORTFOLIO_REFRESH_MINUTES`, 0 to switch off) and stores a snapshot of the totals (kept a year) for the chart. The page reads the stored values, so it never waits on an exchange or a chain.
+
+**EVM wallets** (`wallets`): **New wallet** creates a key on the server from a 12-word BIP-39 recovery phrase (128 bits from the system CSPRNG; first account on `m/44'/60'/0'/0/0`); **Import** takes a private key or a recovery phrase (12 to 24 words, any derivation path); **Watch an address** stores only the address (EIP-55 checksum checked). Networks: Ethereum, Arbitrum, Base, Optimism, Polygon, BNB Chain. Keys use `@noble/curves` (secp256k1), `@noble/hashes` (keccak-256) and `@scure/bip39` / `@scure/bip32`, audited libraries without dependencies.
+
+- Secrets never go into the database, a log line or an API answer: they are written to `~/.openclaw/credentials/wallets/<id>.env` (0600: `WALLET_PRIVATE_KEY`, and `WALLET_MNEMONIC`, `WALLET_DERIVATION_PATH` for a phrase). The API only says whether a key and a phrase are stored. The one exception is a new wallet: its create response (`Cache-Control: no-store`) carries the recovery phrase once, and the page shows it until "I have written the 12 words down" is ticked.
+- If the key cannot be written, the wallet is not created. Deleting a wallet (typing its name) removes it and its portfolio account and moves the key file to `credentials/wallets/trash`.
+- Wallets here do not sign or trade; the Web3 engine keeps its own key in its `.env`.
+
+API (reads open on the tailnet, changes with `X-Trading-Control: 1`, audited): `GET /api/portfolio`, `POST /api/portfolio/refresh`, `POST|PUT|DELETE /api/portfolio/accounts[/:id]`, `GET|PUT /api/portfolio/accounts/:id/holdings`, `DELETE /api/portfolio/holdings/:id`, `GET|POST /api/wallets`, `PUT|DELETE /api/wallets/:id`.
+
+## Web3 pair switches
+
+The Web3 engine reports every token pair it scans, per network, with its pools and DEXes (`dex_pair_controls`, on each pool discovery, every 5 minutes), and reads two switches per pair each cycle:
+
+- **Arbitrage**: off, the pair is not evaluated.
+- **Flash loan**: off, an opportunity on the pair uses only the engine's own capital: the base capital tier only, no loan and no loan fee. The payload says `use_flashloan: false`.
+
+New pairs start with both on (the behaviour before the switches). If the switches cannot be read, the engine evaluates nothing that cycle. The Web3 DEX tab lists the pairs with both switches and sets them per pair or for a whole network. The same over the API:
+
+```bash
+curl -s http://127.0.0.1:18795/api/dex/pairs                           # ?network=base
+curl -s -X PUT -H 'X-Trading-Control: 1' -H 'Content-Type: application/json' \
+     -d '{"flashloan_enabled": false}' http://127.0.0.1:18795/api/dex/pairs/12
+curl -s -X PUT -H 'X-Trading-Control: 1' -H 'Content-Type: application/json' \
+     -d '{"network": "base", "arbitrage_enabled": false}' http://127.0.0.1:18795/api/dex/pairs   # or "ids": [..] or "all": true
+```
+
+Every change records who made it (`updated_by`, `suite_audit_log`).
 
 ## Strategy center
 
@@ -166,6 +205,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `008_pine_scripts.sql`: `pine_scripts` with four examples.
 - `009_news.sql`: `news_feeds` (seven feeds), `news_items`. The older `market_news_cache` table is no longer read.
 - `010_trading_venues.sql`: `trading_venues`.
+- `011_portfolio_wallets_dex_pairs.sql`: `wallets`, `portfolio_accounts`, `portfolio_holdings`, `portfolio_snapshots`, `dex_pair_controls`.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 

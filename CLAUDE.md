@@ -11,6 +11,7 @@ The trading dashboard of the OpenClaw VPS (`agents-s-2vcpu-4gb-ams3`): Node.js 2
 - Service `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on the tailnet at `/trading-suite/`. It embeds system-dashboard (`erensas/system-dashboard`) as its System view, and FreqUI.
 - `/opt/trading-suite` is the live git checkout (branch `master`). Develop in a separate clone, push, then deploy with `scripts/deploy.sh trading-suite` from `erensas/openclaw-workspace`, so a rollback has a previous commit. The deploy runs `npm ci` when the lockfile changed, `npm test`, pending migrations after a `pg_dump` of `trade_db`, then restarts and checks health.
 - The unit runs with the hardening drop-in `systemd/trading-suite-hardening.conf` (read-only `/home` except the listed `ReadWritePaths`); strategies, backtests and venue tests run as sandboxed transient user units, never inside the web process.
+- EVM wallet keys live in `~/.openclaw/credentials/wallets/<id>.env` (0600), written by the suite and never returned by the API (a new wallet's recovery phrase only once, in its create response). That folder must exist (700, openclaw) and be in the drop-in's `ReadWritePaths`. The Web3 engine reads its per-pair switches from `dex_pair_controls` every cycle.
 - Both trading engines (Freqtrade and the Web3 DEX bot) run in dry-run mode; nothing trades live. Going live is a decision for Eren.
 
 ## Working rules (from the workspace `AGENTS.md`)

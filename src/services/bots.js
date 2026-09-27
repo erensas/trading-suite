@@ -162,6 +162,26 @@ function createBots({ db, sysd, strategies, control, freqtrade, venues, config, 
     return Promise.all((await rows()).map((b) => status(b)));
   }
 
+  // A bot's wallet from its API (/balance: total in the stake currency, per-currency
+  // amounts) and whether it runs dry. For the Portfolio tab; read only.
+  async function balance(name) {
+    const bot = (await rows()).find((b) => b.name === name);
+    if (!bot) throw notFound(`No bot named ${name}`);
+    const client = clientFor(bot);
+    if (!client) throw badRequest(`${name} has no Freqtrade API`);
+    const [bal, cfg] = await within(Promise.all([client.api('GET', '/balance'), client.api('GET', '/show_config')]), 8000);
+    return {
+      bot: name,
+      dry_run: typeof cfg.dry_run === 'boolean' ? cfg.dry_run : bot.dry_run !== false,
+      stake_currency: bal.stake || cfg.stake_currency || 'USDT',
+      total: Number(bal.total),
+      starting_capital: bal.starting_capital === undefined ? null : Number(bal.starting_capital),
+      currencies: (bal.currencies || [])
+        .filter((c) => Number(c.balance) > 0)
+        .map((c) => ({ currency: c.currency, quantity: Number(c.balance), est_stake: Number(c.est_stake) })),
+    };
+  }
+
   async function get(name) {
     const bot = await getRow(name);
     const [s, ev] = await Promise.all([status(bot), db.query('SELECT * FROM bot_events WHERE bot = $1 ORDER BY id DESC LIMIT 30', [name])]);
@@ -641,7 +661,7 @@ function createBots({ db, sysd, strategies, control, freqtrade, venues, config, 
   return {
     list, get, act, setStrategy, create, edit, remove, journal, pauseAll, startAll, repauseRunning,
     liveChecks, goLive, goDryRun, setExchangeKeys, keysFromVenue, removeExchangeKeys, exchangeKeys: async (n) => exchangeKeys(await getRow(n)), setCapitalLimit,
-    clientFor, createSchema,
+    clientFor, createSchema, balance,
   };
 }
 

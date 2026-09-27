@@ -45,6 +45,7 @@
       <div class="nav-tabs" role="tablist" aria-label="Trading views" id="nav-tabs">
         <button type="button" class="tab-btn active" data-tab="chart" role="tab" id="tabbtn-chart" aria-controls="tab-chart" aria-selected="true" tabindex="0"><i class="fa-solid fa-chart-column" aria-hidden="true"></i> Markets</button>
         <button type="button" class="tab-btn" data-tab="screener" role="tab" id="tabbtn-screener" aria-controls="tab-screener" aria-selected="false" tabindex="-1"><i class="fa-solid fa-list-check" aria-hidden="true"></i> Screener</button>
+        <button type="button" class="tab-btn" data-tab="portfolio" role="tab" id="tabbtn-portfolio" aria-controls="tab-portfolio" aria-selected="false" tabindex="-1"><i class="fa-solid fa-wallet" aria-hidden="true"></i> Portfolio</button>
         <button type="button" class="tab-btn" data-tab="strategies" role="tab" id="tabbtn-strategies" aria-controls="tab-strategies" aria-selected="false" tabindex="-1"><i class="fa-solid fa-chess-knight" aria-hidden="true"></i> Strategies</button>
         <button type="button" class="tab-btn" data-tab="freqtrade" role="tab" id="tabbtn-freqtrade" aria-controls="tab-freqtrade" aria-selected="false" tabindex="-1"><i class="fa-solid fa-robot" aria-hidden="true"></i> Freqtrade</button>
         <button type="button" class="tab-btn" data-tab="dex" role="tab" id="tabbtn-dex" aria-controls="tab-dex" aria-selected="false" tabindex="-1"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Web3 DEX</button>
@@ -209,6 +210,62 @@
       </section>
 
       <!-- Strategy center: bots, strategy library, editor, backtests -->
+      <!-- Portfolio -->
+      <section id="tab-portfolio" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-portfolio">
+        <div class="card">
+          <div class="card-header wrap">
+            <div class="card-title"><i class="fa-solid fa-wallet" aria-hidden="true"></i> Portfolio <span class="age" data-age="portfolio"></span></div>
+            <div class="toolbar-row"><span class="muted small" id="pf-refreshed"></span><button type="button" class="pill pill-blue" id="pf-refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh values</button></div>
+          </div>
+          <div class="kv-grid" id="pf-totals"></div>
+          <div class="pf-chart" id="pf-chart" aria-label="Portfolio value over time"></div>
+        </div>
+        <div class="pf-stack">
+          <div class="card">
+            <div class="card-header wrap"><div class="card-title"><i class="fa-solid fa-layer-group" aria-hidden="true"></i> Accounts</div><span class="muted small">Manual holdings, Alpaca paper, Freqtrade bots, wallets</span></div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>Account</th><th>Source</th><th>Mode</th><th class="r">Value</th><th class="r">Share</th><th>Updated</th><th>On</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody id="pf-accounts-tbody"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+              </table>
+            </div>
+            <form id="pf-account-form" class="toolbar-row pf-form">
+              <select name="kind" aria-label="Source"><option value="manual">Manual holdings</option><option value="alpaca">Alpaca paper venue</option><option value="freqtrade">Freqtrade bot</option><option value="wallet">Wallet</option></select>
+              <select name="ref" aria-label="Which one" hidden></select>
+              <input name="name" placeholder="Name, e.g. Stocks at IBKR" maxlength="60" required aria-label="Account name">
+              <select name="mode" aria-label="Real money or paper"><option value="real">Real</option><option value="paper">Paper</option></select>
+              <button type="submit" class="btn-buy"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add account</button>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-header wrap"><div class="card-title"><i class="fa-solid fa-chart-pie" aria-hidden="true"></i> Assets</div><span class="muted small">All enabled accounts, by asset</span></div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>Asset</th><th class="r">Quantity</th><th class="r">Value</th><th class="r">Share</th><th>Held in</th></tr></thead>
+                <tbody id="pf-assets-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header wrap">
+            <div class="card-title"><i class="fa-solid fa-key" aria-hidden="true"></i> EVM wallets</div>
+            <div class="toolbar-row">
+              <button type="button" class="pill pill-green" id="wl-new"><i class="fa-solid fa-plus" aria-hidden="true"></i> New wallet</button>
+              <button type="button" class="pill pill-blue" id="wl-import"><i class="fa-solid fa-file-import" aria-hidden="true"></i> Import</button>
+              <button type="button" class="pill pill-gray" id="wl-watch"><i class="fa-solid fa-eye" aria-hidden="true"></i> Watch an address</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead><tr><th>Wallet</th><th>Address</th><th>Origin</th><th>Networks</th><th>Secret stored</th><th class="r">Value</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="wl-tbody"></tbody>
+            </table>
+          </div>
+          <div class="hint">Keys and recovery phrases are written to <code>~/.openclaw/credentials/wallets/&lt;id&gt;.env</code> (0600) on the server and are never shown again; the page only knows whether one is stored. A new wallet shows its 12-word recovery phrase once: write it down, it is the only way to restore the wallet elsewhere. Balances are read over public RPC endpoints (native coin, the stablecoins and every DEX instrument's token on the wallet's networks) and priced from the instrument registry. The Web3 engine keeps its own key in its <code>.env</code>; wallets here do not trade.</div>
+        </div>
+      </section>
+
       <section id="tab-strategies" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-strategies">
         <div class="settings-nav tf-btn-group" id="strat-nav" role="group" aria-label="Strategy center">
           <button type="button" class="tf-btn active" data-pane="bots" aria-pressed="true"><i class="fa-solid fa-robot" aria-hidden="true"></i> Bots</button>
@@ -362,6 +419,27 @@
 
       <!-- Web3 DEX -->
       <section id="tab-dex" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-dex">
+        <div class="card">
+          <div class="card-header wrap">
+            <div class="card-title"><i class="fa-solid fa-toggle-on" aria-hidden="true"></i> Pairs: arbitrage and flash loans <span class="age" data-age="dexpairs"></span></div>
+            <div class="toolbar-row">
+              <select id="dexp-network" aria-label="Network"><option value="">All networks</option></select>
+              <span class="muted small">Selected network:</span>
+              <button type="button" class="pill pill-green" data-dexp-bulk="arbitrage_enabled" data-on="true">Arbitrage on</button>
+              <button type="button" class="pill pill-gray" data-dexp-bulk="arbitrage_enabled" data-on="false">Arbitrage off</button>
+              <button type="button" class="pill pill-green" data-dexp-bulk="flashloan_enabled" data-on="true">Flash loans on</button>
+              <button type="button" class="pill pill-gray" data-dexp-bulk="flashloan_enabled" data-on="false">Flash loans off</button>
+            </div>
+          </div>
+          <div class="muted small" id="dexp-engine"></div>
+          <div class="table-container">
+            <table>
+              <thead><tr><th>Network</th><th>Pair</th><th class="r">Pools</th><th>DEXes</th><th>Last scanned</th><th>Arbitrage</th><th>Flash loan</th><th>Changed</th></tr></thead>
+              <tbody id="dexp-tbody"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="hint">The engine reports every token pair it scans and reads these switches each cycle (about a minute). <b>Arbitrage</b> off: the pair is not evaluated. <b>Flash loan</b> off: an opportunity on the pair uses only the engine's own capital (no loan, no loan fee, no larger capital tiers). New pairs start with both on; if the switches cannot be read, the engine evaluates nothing. The same switches over the API, from the VPS or the tailnet: <code>GET api/dex/pairs</code>, <code>PUT api/dex/pairs/&lt;id&gt;</code> with <code>{"flashloan_enabled": false}</code>, or <code>PUT api/dex/pairs</code> with <code>{"network": "base", "arbitrage_enabled": false}</code> (header <code>X-Trading-Control: 1</code>); every change is audited.</div>
+        </div>
         <div class="card">
           <div class="card-header">
             <div class="card-title"><i class="fa-solid fa-bolt"></i> Web3 DEX executions <span class="age" data-age="dex"></span></div>
@@ -759,5 +837,7 @@
   <script src="insights.js"></script>
   <script src="insights-ui.js"></script>
   <script src="venues-ui.js"></script>
+  <script src="portfolio-ui.js"></script>
+  <script src="dex-ui.js"></script>
 </body>
 </html>

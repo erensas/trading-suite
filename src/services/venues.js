@@ -129,16 +129,40 @@ function createVenues({ db, sysd, config, log, httpFetch = (...a) => fetch(...a)
     trashKeys(id);
   }
 
-  async function testAlpaca(v) {
+  // GET on the Alpaca paper API with the venue's keys; null when no keys are set.
+  function alpacaCaller(v) {
     const env = readEnvFile(file(v.id));
-    if (!env.VENUE_KEY || !env.VENUE_SECRET) return { ok: false, message: 'set the API key and secret of the paper account first' };
+    if (!env.VENUE_KEY || !env.VENUE_SECRET) return null;
     const headers = { 'APCA-API-KEY-ID': env.VENUE_KEY, 'APCA-API-SECRET-KEY': env.VENUE_SECRET, Accept: 'application/json' };
-    const call = async (p) => {
+    return async (p) => {
       const res = await httpFetch(`${ALPACA.paper}${p}`, { headers, signal: AbortSignal.timeout(10000) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(`${p}: HTTP ${res.status}${body.message ? ` ${String(body.message).slice(0, 120)}` : ''}`);
       return body;
     };
+  }
+
+  // The paper account's equity, cash and positions (Portfolio tab). Read only.
+  async function alpacaPortfolio(id) {
+    const v = await get(id);
+    if (v.kind !== 'broker' || v.exchange !== 'alpaca') throw badRequest(`${v.name} is not an Alpaca account`);
+    const call = alpacaCaller(v);
+    if (!call) throw badRequest(`${v.name} has no API keys`);
+    const [acct, positions] = await Promise.all([call('/v2/account'), call('/v2/positions')]);
+    return {
+      currency: acct.currency || 'USD',
+      equity: Number(acct.equity),
+      cash: Number(acct.cash),
+      positions: (positions || []).map((p) => ({
+        symbol: p.symbol, quantity: Number(p.qty), price: Number(p.current_price), value: Number(p.market_value),
+        cost_basis: Number(p.cost_basis), pnl: Number(p.unrealized_pl), asset_class: p.asset_class,
+      })),
+    };
+  }
+
+  async function testAlpaca(v) {
+    const call = alpacaCaller(v);
+    if (!call) return { ok: false, message: 'set the API key and secret of the paper account first' };
     try {
       const [acct, positions] = await Promise.all([call('/v2/account'), call('/v2/positions')]);
       const account = { status: acct.status, currency: acct.currency, equity: Number(acct.equity), buying_power: Number(acct.buying_power), trading_blocked: !!acct.trading_blocked, positions: positions.length };
@@ -196,7 +220,7 @@ function createVenues({ db, sysd, config, log, httpFetch = (...a) => fetch(...a)
     return { engine: e ? { mode: e.mode, state: Number(e.age) > 180 ? 'OFFLINE' : e.state, last_seen: e.last_seen, detail: e.detail } : null, networks: pools.rows };
   }
 
-  return { exchanges, isTradable, list, get, create, update, remove, setKeys, removeKeys, test, freqtradeKeys, dex, keyStatus };
+  return { exchanges, isTradable, list, get, create, update, remove, setKeys, removeKeys, test, freqtradeKeys, dex, keyStatus, alpacaPortfolio };
 }
 
 module.exports = { createVenues };

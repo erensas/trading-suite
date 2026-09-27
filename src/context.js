@@ -23,6 +23,9 @@ const { createBots } = require('./services/bots');
 const { createPineScripts } = require('./services/pine');
 const { createNews } = require('./services/news');
 const { createVenues } = require('./services/venues');
+const { createWallets } = require('./services/wallets');
+const { createPortfolio } = require('./services/portfolio');
+const { createDexPairs } = require('./services/dex-pairs');
 const { createTickerRefresh } = require('./jobs/ticker-refresh');
 const { requireControl } = require('./http/middleware');
 
@@ -69,6 +72,11 @@ function createContext(overrides = {}) {
   make('backtests', () => createBacktests(ctx));
   make('bots', () => createBots(ctx));
   make('pineScripts', () => createPineScripts(ctx));
+  // Portfolio tab: wallets (keys in credentials/wallets), accounts and their valuation; the
+  // Web3 engine's per-pair arbitrage and flash-loan switches.
+  make('wallets', () => createWallets(ctx));
+  make('portfolio', () => createPortfolio({ db: ctx.db, venues: ctx.venues, bots: ctx.bots, wallets: ctx.wallets, log: ctx.log, fetchImpl: (...a) => ctx.httpFetch(...a) }));
+  make('dexPairs', () => createDexPairs(ctx));
   make('news', () => createNews(ctx));
   make('reports', () => createReports(ctx));
   make('tickerRefresh', () => createTickerRefresh(ctx));

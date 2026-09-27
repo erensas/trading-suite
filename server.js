@@ -13,6 +13,7 @@ let haltGuard = null;
 let indicatorAlerts = null;
 let backtestQueue = null;
 let newsJob = null;
+let portfolioJob = null;
 
 // SIGTERM (systemctl stop/restart, deploy): stop taking requests, close log streams and
 // jobs, let running requests finish, close the DB pool. Forced exit after 10 s.
@@ -29,6 +30,7 @@ function shutdown(signal) {
   if (indicatorAlerts) indicatorAlerts.stop();
   if (backtestQueue) backtestQueue.stop();
   if (newsJob) newsJob.stop();
+  if (portfolioJob) portfolioJob.stop();
   for (const res of ctx.logStreams) res.end();
   const closeServer = server ? new Promise((resolve) => server.close(resolve)) : Promise.resolve();
   closeServer
@@ -66,6 +68,8 @@ ctx.settings.load().finally(() => {
     // News feeds every 15 minutes, the first time shortly after start.
     newsJob = startInterval('news', 15 * 60 * 1000, () => ctx.news.refresh(), log);
     setTimeout(() => !ctx.shuttingDown && ctx.news.refresh().catch((e) => log.warn({ error: e.message }, 'news refresh failed')), 30000).unref();
+    // Portfolio: every account valued and the totals kept, hourly by default (no accounts: a no-op).
+    if (config.portfolioRefreshMinutes > 0) portfolioJob = startInterval('portfolio', config.portfolioRefreshMinutes * 60 * 1000, () => ctx.portfolio.refresh(), log);
   }
   server = app.listen(config.port, config.host, (err) => {
     if (err) {

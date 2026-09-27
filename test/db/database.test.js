@@ -832,3 +832,150 @@ test('phase H: trading venues, write-only keys, tests, keys for a bot', { skip }
   const dex = (await call('GET', '/api/venues/dex')).json;
   assert.ok(Array.isArray(dex.networks));
 });
+
+test('portfolio, wallets and Web3 pair controls', { skip }, async (t) => {
+  await resetSchema();
+  await withClient((c) => migrate.up(c, migrate.readMigrations(), quiet));
+  const log = createLogger('silent');
+  const db = createPool({ connectionString: URL_, max: 4, statementTimeoutMs: 3000 }, log);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-wallets-'));
+  const walletDir = path.join(tmp, 'wallets');
+  // Every JSON-RPC balance: 2 ETH; 1500 USDC on the first core token; nothing else.
+  const rpcCalls = [];
+  const httpFetch = async (url, init) => {
+    if (String(url).startsWith('https://paper-api.alpaca.markets')) {
+      const body = url.endsWith('/v2/account') ? { status: 'ACTIVE', currency: 'USD', equity: '1000', cash: '400' } : [{ symbol: 'AAPL', qty: '3', current_price: '200', market_value: '600', cost_basis: '500', unrealized_pl: '100', asset_class: 'us_equity' }];
+      return { ok: true, status: 200, json: async () => body };
+    }
+    rpcCalls.push(url);
+    const batch = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () =>
+        batch.map((c) => {
+          if (c.method === 'eth_getBalance') return { id: c.id, result: '0x1bc16d674ec80000' };
+          const [{ to, data }] = c.params;
+          const usdc = to.toLowerCase() === '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+          if (data === '0x313ce567') return { id: c.id, result: usdc ? '0x6' : '0x12' };
+          return { id: c.id, result: usdc ? '0x' + (1500n * 1000000n).toString(16) : '0x0' };
+        }),
+    };
+  };
+  const app = await startApp({ db, httpFetch, freqtrade: fakeFreqtrade({ 'GET /balance': { total: 950, stake: 'USDT', currencies: [{ currency: 'USDT', balance: 900, est_stake: 900 }, { currency: 'BTC', balance: 0.001, est_stake: 50 }] }, 'GET /show_config': { dry_run: true, stake_currency: 'USDT' } }), env: { WALLET_CREDENTIALS_DIR: walletDir, VENUE_CREDENTIALS_DIR: path.join(tmp, 'venues'), BOTS_DIR: path.join(tmp, 'bots'), BOT_CREDENTIALS_DIR: path.join(tmp, 'botcreds') } });
+  t.after(async () => {
+    await app.close();
+    await db.end();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  const call = (method, url, body) => app.request(method, url, { control: method !== 'GET', body });
+  await db.query("INSERT INTO instrument_registry (symbol, category, base_asset, quote_asset, last_price) VALUES ('ETH/USDT', 'CEX', 'ETH', 'USDT', 3000), ('AAPL', 'TRADFI', 'AAPL', 'USD', 200), ('BTC/USDT', 'CEX', 'BTC', 'USDT', 50000)");
+
+  // ---- wallets: control guard, validation, write-only secrets ----
+  assert.equal((await app.request('POST', '/api/wallets', { body: { name: 'x', origin: 'generated' } })).status, 403, 'control header required');
+  assert.match((await call('POST', '/api/wallets', { name: 'Bad', origin: 'private_key', private_key: '0x1234' })).json.error, /64 hex digits/);
+  assert.match((await call('POST', '/api/wallets', { name: 'Bad', origin: 'mnemonic', mnemonic: 'test test test' })).json.error, /12, 15, 18, 21 or 24 words/);
+  assert.match((await call('POST', '/api/wallets', { name: 'Bad', origin: 'watch', address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92267' })).json.error, /checksum/);
+  assert.match((await call('POST', '/api/wallets', { name: 'Bad', origin: 'generated', networks: ['moon'] })).json.error, /unknown moon/);
+
+  const gen = await call('POST', '/api/wallets', { name: 'Fresh', origin: 'generated', networks: ['eth'] });
+  assert.equal(gen.status, 200, gen.text);
+  assert.equal(gen.headers.get('cache-control'), 'no-store');
+  assert.equal(gen.json.recovery_phrase.split(' ').length, 12, 'the new phrase once, in the create response');
+  assert.equal(gen.json.wallet.key_stored, true);
+  assert.equal(gen.json.wallet.phrase_stored, true);
+  const genFile = path.join(walletDir, `${gen.json.wallet.id}.env`);
+  assert.equal(fs.statSync(genFile).mode & 0o777, 0o600);
+  assert.ok(fs.readFileSync(genFile, 'utf8').includes(gen.json.recovery_phrase));
+
+  const PK = '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318';
+  const imp = await call('POST', '/api/wallets', { name: 'Imported', origin: 'private_key', private_key: PK, networks: ['eth', 'base'] });
+  assert.equal(imp.json.wallet.address, '0x2c7536E3605D9C16a7a3D7b1898e529396a65c23');
+  assert.equal(imp.json.recovery_phrase, undefined, 'an imported key is never echoed');
+  const phrase = await call('POST', '/api/wallets', { name: 'Phrase', origin: 'mnemonic', mnemonic: 'test test test test test test test test test test test junk', track: false });
+  assert.equal(phrase.json.wallet.address, '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266');
+  assert.equal(phrase.json.account_id, null, 'track: false');
+  assert.match((await call('POST', '/api/wallets', { name: 'Again', origin: 'watch', address: '0xF39FD6E51AAD88F6F4CE6AB8827279CFFFB92266' })).json.error, /exists/, 'one row per address');
+  const watch = await call('POST', '/api/wallets', { name: 'Watched', origin: 'watch', address: '0x70997970c51812dc3a010c7d01b50e0d17dc79c8' });
+  assert.equal(watch.json.wallet.address, '0x70997970C51812dc3A010C7d01b50e0d17dc79C8');
+  assert.equal(watch.json.wallet.key_stored, false);
+  assert.ok(!fs.existsSync(path.join(walletDir, `${watch.json.wallet.id}.env`)));
+
+  // No secret in any answer, the database or the audit log.
+  const everything = JSON.stringify([(await call('GET', '/api/wallets')).json, (await call('GET', '/api/portfolio')).json, (await db.query('SELECT * FROM wallets')).rows, (await db.query('SELECT * FROM suite_audit_log')).rows]);
+  assert.ok(!everything.includes(PK.slice(2)), 'private key');
+  assert.ok(!everything.includes(gen.json.recovery_phrase), 'recovery phrase');
+  assert.ok(!everything.includes('test test test'), 'imported phrase');
+
+  // A key that cannot be stored leaves no wallet behind.
+  fs.chmodSync(walletDir, 0o500);
+  if (process.getuid && process.getuid() !== 0) {
+    const fail = await call('POST', '/api/wallets', { name: 'Unstorable', origin: 'generated' });
+    assert.equal(fail.status, 500);
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM wallets WHERE name = 'Unstorable'")).rows[0].n, 0);
+  }
+  fs.chmodSync(walletDir, 0o700);
+
+  // ---- portfolio: wallet accounts were created and valued; manual, Alpaca, Freqtrade ----
+  let pf = (await call('GET', '/api/portfolio')).json;
+  const fresh = pf.accounts.find((a) => a.kind === 'wallet' && a.ref === String(gen.json.wallet.id));
+  assert.equal(fresh.last_value_usd, 2 * 3000 + 1500, '2 ETH at 3000 plus 1500 USDC');
+  assert.ok(rpcCalls.every((u) => u.startsWith('https://')));
+  const manual = (await call('POST', '/api/portfolio/accounts', { name: 'Stocks', kind: 'manual', mode: 'real' })).json.account;
+  assert.match((await call('PUT', `/api/portfolio/accounts/${manual.id}/holdings`, { symbol: 'TSLA', quantity: 1 })).json.error, /not a registered instrument/);
+  assert.equal((await call('PUT', `/api/portfolio/accounts/${manual.id}/holdings`, { symbol: 'aapl', quantity: 5, cost_basis: 800 })).status, 200);
+  assert.equal((await call('PUT', `/api/portfolio/accounts/${manual.id}/holdings`, { symbol: 'USD', kind: 'cash', quantity: 100 })).status, 200);
+  const venue = (await db.query("INSERT INTO trading_venues (name, kind, exchange, trading_mode, mode) VALUES ('Alpaca', 'broker', 'alpaca', 'spot', 'paper') RETURNING id")).rows[0];
+  assert.match((await call('POST', '/api/portfolio/accounts', { name: 'Paper', kind: 'alpaca', ref: 999 })).json.error, /Alpaca venue/);
+  fs.mkdirSync(path.join(tmp, 'venues'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'venues', `${venue.id}.env`), 'VENUE_KEY=PKTESTKEY1234\nVENUE_SECRET=secretsecret\n', { mode: 0o600 });
+  assert.equal((await call('POST', '/api/portfolio/accounts', { name: 'Alpaca paper', kind: 'alpaca', ref: venue.id, mode: 'real' })).json.account.mode, 'paper', 'Alpaca is always paper');
+  await db.query("INSERT INTO bots (name, engine, managed, unit, api_url, dry_run) VALUES ('main', 'freqtrade', false, 'freqtrade.service', 'http://127.0.0.1:8080', true) ON CONFLICT (name) DO NOTHING");
+  assert.equal((await call('POST', '/api/portfolio/accounts', { name: 'Main bot', kind: 'freqtrade', ref: 'main' })).status, 200);
+  assert.match((await call('POST', '/api/portfolio/accounts', { name: 'Main bot 2', kind: 'freqtrade', ref: 'main' })).json.error, /exists/, 'one account per source');
+
+  const refreshed = (await call('POST', '/api/portfolio/refresh', {})).json.results;
+  assert.ok(refreshed.every((r) => r.ok), JSON.stringify(refreshed));
+  pf = (await call('GET', '/api/portfolio')).json;
+  const by = (name) => pf.accounts.find((a) => a.name === name);
+  assert.equal(by('Stocks').last_value_usd, 5 * 200 + 100);
+  assert.equal(by('Stocks').last_positions.find((p) => p.asset === 'AAPL').pnl_usd, 200);
+  assert.equal(by('Alpaca paper').last_value_usd, 1000);
+  assert.equal(by('Main bot').last_value_usd, 950);
+  assert.equal(by('Main bot').mode, 'paper', 'a dry-run bot is paper');
+  const walletsTotal = pf.accounts.filter((a) => a.kind === 'wallet').reduce((s, a) => s + a.last_value_usd, 0);
+  assert.equal(pf.totals.total_usd, 1100 + 1000 + 950 + walletsTotal);
+  assert.equal(pf.totals.paper_usd, 1000 + 950);
+  assert.equal(pf.assets[0].asset, 'ETH', 'largest asset first');
+  assert.equal(pf.history.length, 1, 'a full refresh stores a snapshot');
+  assert.equal((await call('PUT', `/api/portfolio/accounts/${by('Main bot').id}`, { enabled: false })).json.account.enabled, false);
+  assert.equal((await call('GET', '/api/portfolio')).json.totals.paper_usd, 1000, 'a disabled account is left out');
+
+  // Deleting a wallet removes its account and moves the key file to the trash.
+  const del = await call('DELETE', `/api/wallets/${imp.json.wallet.id}`);
+  assert.equal(del.json.secrets_trashed, true);
+  assert.ok(!fs.existsSync(path.join(walletDir, `${imp.json.wallet.id}.env`)));
+  assert.equal(fs.readdirSync(path.join(walletDir, 'trash')).length, 1);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM portfolio_accounts WHERE kind = 'wallet' AND ref = $1", [String(imp.json.wallet.id)])).rows[0].n, 0);
+
+  // ---- Web3 pair controls ----
+  await db.query(`INSERT INTO dex_pair_controls (network, token_a, token_b, pool_count, dexes, last_seen_at) VALUES
+    ('arbitrum', 'USDC', 'WETH', 3, '{uniswap_v3_005,uniswap_v3_03}', NOW()), ('arbitrum', 'ARB', 'WETH', 1, '{uniswap_v3_005}', NOW()), ('base', 'USDC', 'WETH', 3, '{uniswap_v3_005}', NOW())`);
+  const pairs = (await call('GET', '/api/dex/pairs')).json.pairs;
+  assert.equal(pairs.length, 3);
+  assert.ok(pairs.every((p) => p.arbitrage_enabled && p.flashloan_enabled), 'new pairs start with both on');
+  assert.equal((await app.request('PUT', `/api/dex/pairs/${pairs[0].id}`, { body: { flashloan_enabled: false } })).status, 403);
+  assert.equal((await call('PUT', `/api/dex/pairs/${pairs[0].id}`, {})).status, 400, 'a flag is required');
+  const one = (await call('PUT', `/api/dex/pairs/${pairs[0].id}`, { flashloan_enabled: false })).json.pair;
+  assert.equal(one.flashloan_enabled, false);
+  assert.equal(one.arbitrage_enabled, true, 'the other flag stays');
+  assert.match(one.updated_by, /tester/);
+  const bulk = (await call('PUT', '/api/dex/pairs', { network: 'arbitrum', arbitrage_enabled: false })).json;
+  assert.equal(bulk.updated, 2);
+  assert.equal((await call('PUT', '/api/dex/pairs', { arbitrage_enabled: true })).status, 400, 'bulk needs ids, network or all');
+  assert.equal((await call('GET', '/api/dex/pairs?network=base')).json.pairs[0].arbitrage_enabled, true);
+  assert.equal((await call('PUT', '/api/dex/pairs', { all: true, flashloan_enabled: true })).json.updated, 3);
+  const audited = (await db.query("SELECT entity, after FROM suite_audit_log WHERE entity LIKE 'dex pair%' ORDER BY id")).rows;
+  assert.equal(audited.length, 3);
+  assert.equal(audited[0].after.flashloan_enabled, false);
+});

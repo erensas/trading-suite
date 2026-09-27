@@ -33,6 +33,10 @@ function loadConfig(env = process.env) {
     supervisorLogPath:
       env.SUPERVISOR_LOG_PATH || '/home/openclaw/.openclaw/worktrees/web3-dex-bot/web3-dex-bot/supervisor/supervisor.log',
     jobs: env.SUITE_JOBS !== '0',
+    // EVM wallets created or imported in the Portfolio tab: <id>.env (0600) per wallet.
+    walletCredentialsDir: env.WALLET_CREDENTIALS_DIR || path.join(home, '.openclaw', 'credentials', 'wallets'),
+    // Portfolio valuation (all accounts, and a snapshot of the totals) by the background job.
+    portfolioRefreshMinutes: int(env.PORTFOLIO_REFRESH_MINUTES, 60),
     // Strategy center: managed Freqtrade bots, the strategy library, backtests.
     bots: {
       dir: env.BOTS_DIR || path.join(home, '.openclaw', 'bots'),

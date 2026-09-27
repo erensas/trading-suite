@@ -27,8 +27,12 @@
     visible: false,
   };
 
-  // ---- CodeMirror mode for Pine ------------------------------------------------------------------
-  CodeMirror.defineSimpleMode('pine', {
+  // ---- CodeMirror mode for Pine (CodeMirror and pine.js load when the panel first opens) --------
+  async function loadLibs() {
+    await Promise.all([TS.loadEditorLib(), TS.loadScript('pine.js')]);
+    if (!CodeMirror.modes.pine) defineMode();
+  }
+  const defineMode = () => CodeMirror.defineSimpleMode('pine', {
     start: [
       { regex: /\/\/.*/, token: 'comment' },
       { regex: /"(?:[^\\"]|\\.)*"|'(?:[^\\']|\\.)*'/, token: 'string' },
@@ -370,7 +374,7 @@ plot(ma, "SMA", color=color.orange)
 
   // New candles (incremental refresh, another symbol or timeframe): run again.
   function onCandles() {
-    if (!ST.visible || !ST.source || !$('pine-on-chart').checked) return;
+    if (!ST.visible || !ST.source || !$('pine-on-chart').checked || !window.Pine) return;
     const r = ST.result;
     try {
       const next = Pine.run(ST.source, TS.candles || [], { inputs: ST.inputs[inputKey()] || {}, symbol: TS.activeSymbol || '', timeframe: TS.activeTf || '' });
@@ -431,6 +435,12 @@ plot(ma, "SMA", color=color.orange)
     if (!on) {
       detach();
       TS.renderLegend();
+      return;
+    }
+    try {
+      await loadLibs();
+    } catch (e) {
+      out(`<div class="form-error">The editor did not load: ${esc(e.message)}. Reload the page.</div>`);
       return;
     }
     ensureEditor();

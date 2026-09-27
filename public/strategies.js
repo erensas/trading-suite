@@ -805,7 +805,7 @@ class ${name}(IStrategy):
     if (!(await leaveEditor())) return;
     ST.editing = { name, isNew: true, sha: null };
     setPane('editor');
-    setEditorValue(source, true);
+    await setEditorValue(source, true);
     fillEditorSelect();
     $('editor-versions').innerHTML = '<option>Not saved yet</option>';
   });
@@ -837,7 +837,8 @@ class ${name}(IStrategy):
     return ST.editor;
   }
 
-  function setEditorValue(source, dirty = false) {
+  async function setEditorValue(source, dirty = false) {
+    await TS.loadEditorLib();
     ensureEditor();
     ST.settingValue = true;
     ST.editor.setValue(source);
@@ -871,6 +872,12 @@ class ${name}(IStrategy):
   }
 
   async function openEditorPane() {
+    try {
+      await TS.loadEditorLib();
+    } catch (e) {
+      $('editor-state').textContent = `The editor did not load: ${e.message}`;
+      return;
+    }
     ensureEditor();
     await loadLibrary({ quiet: true });
     fillEditorSelect();
@@ -892,7 +899,7 @@ class ${name}(IStrategy):
     try {
       const [s, v] = await Promise.all([TS.api(`api/strategies/${encodeURIComponent(name)}`), TS.api(`api/strategies/${encodeURIComponent(name)}/versions`)]);
       ST.editing = { name, isNew: false, sha: s.strategy.sha };
-      setEditorValue(s.strategy.source);
+      await setEditorValue(s.strategy.source);
       fillEditorSelect();
       $('editor-versions').innerHTML = v.versions.map((x, i) => `<option value="${x.id}">${i === 0 ? 'Current' : `Version ${x.id}`} · ${esc(fmtTime(x.created_at))} · ${esc(x.sha.slice(0, 7))}</option>`).join('');
       if (s.strategy.check_detail) renderCheck(s.strategy.check_detail);
@@ -906,7 +913,7 @@ class ${name}(IStrategy):
     if (!ST.editing || ST.editing.isNew) return;
     try {
       const v = (await TS.api(`api/strategies/${encodeURIComponent(ST.editing.name)}/versions/${e.target.value}`)).version;
-      setEditorValue(v.source, v.sha !== ST.editing.sha);
+      await setEditorValue(v.source, v.sha !== ST.editing.sha);
       if (v.sha !== ST.editing.sha) toast(ST.editing.name, `version ${v.id} is in the editor; Save makes it the current one`, 'info');
     } catch (err) {
       toast('Version not loaded', err.message, 'error');

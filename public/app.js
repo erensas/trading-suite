@@ -63,6 +63,31 @@ const apiSend = (method, url, body) =>
 TS.api = api;
 TS.apiSend = apiSend;
 
+// Scripts only some views need (the code editors, the Pine interpreter) load on first use.
+const loadedScripts = new Map();
+TS.loadScript = (src) => {
+  if (!loadedScripts.has(src)) {
+    loadedScripts.set(
+      src,
+      new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => {
+          loadedScripts.delete(src);
+          reject(new Error(`${src} did not load`));
+        };
+        document.head.appendChild(s);
+      })
+    );
+  }
+  return loadedScripts.get(src);
+};
+TS.loadEditorLib = async () => {
+  await TS.loadScript('vendor/codemirror/lib/codemirror.js');
+  await Promise.all([TS.loadScript('vendor/codemirror/mode/python/python.js'), TS.loadScript('vendor/codemirror/addon/mode/simple.js')]);
+};
+
 // Number formatting: cached Intl formatters, 4 significant digits below 1, and the
 // subscript-zero notation for micro prices (0.00000439 -> 0.0₅439).
 const NUMBER_FORMATS = new Map();

@@ -1,6 +1,7 @@
 // The Express app: middleware, static files, API routes, error handling.
 const path = require('path');
 const express = require('express');
+const compression = require('compression');
 const { securityHeaders, requestContext } = require('./http/middleware');
 const { errorHandler, notFoundHandler } = require('./http/errors');
 
@@ -25,6 +26,8 @@ function createApp(ctx) {
 
   app.use(requestContext(ctx.log));
   app.use(securityHeaders);
+  // gzip for pages, scripts and JSON (the log stream is sent as it comes).
+  app.use(compression({ filter: (req, res) => !req.path.endsWith('/logs/stream') && compression.filter(req, res) }));
   // Strategy sources may be up to 200 KB; everything else stays small.
   const smallJson = express.json({ limit: '64kb' });
   const largeJson = express.json({ limit: '256kb' });

@@ -83,9 +83,13 @@ TS.loadScript = (src) => {
   }
   return loadedScripts.get(src);
 };
+// Same version tag as the CodeMirror stylesheet in index.html (?v=...), so an upgrade is not
+// hidden by the browser cache.
 TS.loadEditorLib = async () => {
-  await TS.loadScript('vendor/codemirror/lib/codemirror.js');
-  await Promise.all([TS.loadScript('vendor/codemirror/mode/python/python.js'), TS.loadScript('vendor/codemirror/addon/mode/simple.js')]);
+  const css = document.querySelector('link[href*="vendor/codemirror/"]');
+  const v = css && css.getAttribute('href').includes('?') ? `?${css.getAttribute('href').split('?')[1]}` : '';
+  await TS.loadScript(`vendor/codemirror/lib/codemirror.js${v}`);
+  await Promise.all([TS.loadScript(`vendor/codemirror/mode/python/python.js${v}`), TS.loadScript(`vendor/codemirror/addon/mode/simple.js${v}`)]);
 };
 
 // Number formatting: cached Intl formatters, 4 significant digits below 1, and the

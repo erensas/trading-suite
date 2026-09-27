@@ -162,3 +162,16 @@ test('candles: unknown instrument is 404, a failing provider falls back to the c
   assert.equal(second.json.stale, true);
   assert.match(second.json.staleReason, /Freqtrade down/);
 });
+
+test('index.html: vendor files carry their package version, the page is not cached as is', async (t) => {
+  const app = await startApp();
+  t.after(() => app.close());
+  const res = await app.request('GET', '/');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
+  const lwc = require('lightweight-charts/package.json').version;
+  assert.ok(res.text.includes(`vendor/lightweight-charts/lightweight-charts.standalone.production.js?v=${lwc}`));
+  assert.ok(!/(src|href)="vendor\/[^"?]+"/.test(res.text), 'every vendor reference is versioned');
+  const js = await app.request('GET', '/app.js');
+  assert.equal(js.headers.get('cache-control'), 'no-cache');
+});

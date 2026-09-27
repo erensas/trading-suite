@@ -97,7 +97,9 @@
   });
 
   // ---- panes ---------------------------------------------------------------------------
-  const PANES = ['general', 'providers', 'instruments', 'integrations'];
+  // Other scripts add panes with a loader: TS.settingsLoaders[name] = fn.
+  const PANES = ['general', 'providers', 'instruments', 'integrations', 'news', 'venues'];
+  TS.settingsLoaders = TS.settingsLoaders || {};
   function showPane(name) {
     if (!PANES.includes(name)) name = 'general';
     pane = name;
@@ -112,6 +114,7 @@
     if (name === 'providers') loadProviders();
     if (name === 'instruments') loadInstruments();
     if (name === 'integrations') loadIntegrations();
+    if (TS.settingsLoaders[name]) TS.settingsLoaders[name]();
   }
   $('settings-nav').addEventListener('click', (e) => {
     const b = e.target.closest('[data-settings]');

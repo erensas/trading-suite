@@ -669,3 +669,82 @@ test('phase F: Pine scripts with seeded examples', { skip }, async (t) => {
   const audit = (await db.query("SELECT action FROM suite_audit_log WHERE entity = 'pine script' ORDER BY id")).rows.map((r) => r.action);
   assert.deepEqual(audit, ['create', 'update', 'delete']);
 });
+
+test('phase G: news feeds, tagging, dedupe, per-symbol feeds, insights', { skip }, async (t) => {
+  await resetSchema();
+  await withClient((c) => migrate.up(c, migrate.readMigrations(), quiet));
+  const log = createLogger('silent');
+  const db = createPool({ connectionString: URL_, max: 4, statementTimeoutMs: 3000 }, log);
+  const now = new Date().toUTCString();
+  const rss = (items) => `<rss version="2.0"><channel><title>x</title>${items.map(([g, title]) => `<item><guid>${g}</guid><title>${title}</title><link>https://news.example/${g}</link><pubDate>${now}</pubDate></item>`).join('')}</channel></rss>`;
+  const pages = {
+    'https://cointelegraph.com/rss': rss([['a1', 'Bitcoin surges to a record high'], ['a2', 'Solana network outage: SOL falls']]),
+    'https://decrypt.co/feed': rss([['b1', 'Bitcoin surges to a record high'], ['b2', 'Ether staking grows']]),
+    'https://feeds.finance.yahoo.com/rss/2.0/headline?s=AAPL&region=US&lang=en-US': rss([['y1', 'Apple services revenue beats estimates'], ['y2', 'Netflix stock slides']]),
+  };
+  const fetched = [];
+  const newsFetch = async (url) => {
+    fetched.push(url);
+    if (!pages[url]) return { ok: false, status: 404, url, text: async () => '' };
+    return { ok: true, status: 200, url, text: async () => pages[url] };
+  };
+  // 60 hourly candles for the insights endpoint.
+  const rising = Array.from({ length: 120 }, (_, i) => ({ time: 1790000000 + i * 3600, open: 100 + i, high: 101.5 + i, low: 99 + i, close: 100.8 + i, volume: 5 }));
+  const guard = tableGuard({ 'Binance Spot': { candles: rising } });
+  guard.method = 'candles';
+  const app = await startApp({ db, guard, newsFetch, freqtrade: fakeFreqtrade({}) });
+  t.after(async () => {
+    await app.close();
+    await db.end();
+  });
+  await db.query("INSERT INTO instrument_registry (symbol, category, base_asset, quote_asset) VALUES ('BTC/USDT', 'CEX', 'BTC', 'USDT'), ('ETH/USDT', 'CEX', 'ETH', 'USDT'), ('AAPL', 'TRADFI', NULL, NULL)");
+  await db.query("UPDATE instrument_registry SET name = 'Apple Inc.' WHERE symbol = 'AAPL'");
+  const binance = (await db.query("SELECT id FROM market_providers WHERE name = 'Binance Spot'")).rows[0].id;
+  await db.query('INSERT INTO instrument_listings (symbol, provider_id, priority) VALUES ($1, $2, 0)', ['BTC/USDT', binance]);
+
+  const feeds = (await app.request('GET', '/api/news/feeds')).json.feeds;
+  assert.equal(feeds.length, 7);
+  const result = await app.ctx.news.refresh();
+  assert.ok(fetched.includes('https://feeds.finance.yahoo.com/rss/2.0/headline?s=AAPL&region=US&lang=en-US'));
+  const items = (await db.query('SELECT title, assets, tone FROM news_items ORDER BY id')).rows;
+  // The same headline from a second feed is stored once.
+  assert.equal(items.filter((i) => i.title === 'Bitcoin surges to a record high').length, 1);
+  assert.deepEqual(items.find((i) => i.title.startsWith('Bitcoin')).assets, ['BTC']);
+  assert.equal(items.find((i) => i.title.startsWith('Bitcoin')).tone, 1);
+  assert.deepEqual(items.find((i) => i.title.startsWith('Ether')).assets, ['ETH']);
+  assert.deepEqual(items.find((i) => i.title.startsWith('Apple')).assets, ['AAPL']);
+  assert.deepEqual(items.find((i) => i.title.startsWith('Netflix')).assets, []);
+  assert.ok(result.results.some((r) => r.feed === 'CoinDesk' && /HTTP 404/.test(r.error)));
+  assert.match((await db.query("SELECT last_error FROM news_feeds WHERE name = 'CoinDesk'")).rows[0].last_error, /404/);
+
+  const btc = (await app.request('GET', '/api/trading/news?symbol=BTC%2FUSDT')).json;
+  assert.equal(btc.asset, 'BTC');
+  assert.equal(btc.general, false);
+  assert.equal(btc.news.length, 1);
+  // SOL is not registered here, so its article is untagged; a symbol without news gets the general list.
+  await db.query("INSERT INTO instrument_registry (symbol, category, base_asset) VALUES ('XRP/USDT', 'CEX', 'XRP')");
+  const xrp = (await app.request('GET', '/api/news?symbol=XRP%2FUSDT')).json;
+  assert.equal(xrp.general, true);
+  assert.ok(xrp.items.length >= 3);
+  const sum = (await app.request('GET', '/api/news/summary?symbol=BTC%2FUSDT')).json.summary;
+  assert.deepEqual([sum.asset, sum.n, sum.n24, sum.pos], ['BTC', 1, 1, 1]);
+
+  // Feed validation and CRUD.
+  const bad = async (body) => (await app.request('POST', '/api/news/feeds', { control: true, body })).status;
+  assert.equal(await bad({ name: 'x', url: 'http://example.com/rss' }), 400);
+  assert.equal(await bad({ name: 'x', url: 'https://127.0.0.1/rss' }), 400);
+  assert.equal(await bad({ name: 'x', url: 'https://example.com/rss', kind: 'per_symbol' }), 400);
+  assert.equal(await bad({ name: 'Decrypt', url: 'https://example.com/other' }), 409);
+  const added = await app.request('POST', '/api/news/feeds', { control: true, body: { name: 'Mine', url: 'https://example.com/rss', category: 'other' } });
+  assert.equal(added.status, 200);
+  const off = await app.request('PUT', `/api/news/feeds/${added.json.feed.id}`, { control: true, body: { enabled: false } });
+  assert.equal(off.json.feed.enabled, false);
+  assert.equal((await app.request('DELETE', `/api/news/feeds/${added.json.feed.id}`, { control: true })).status, 200);
+
+  // Insights from the instrument's candles, with the news count.
+  const ins = (await app.request('GET', '/api/insights?symbol=BTC%2FUSDT&tf=1h')).json;
+  assert.equal(ins.ok, true);
+  assert.equal(ins.regime.kind, 'uptrend');
+  assert.equal(ins.news.n, 1);
+  assert.ok(ins.indicators.length >= 3 && ins.strategies.length >= 1);
+});

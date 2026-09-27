@@ -12,6 +12,7 @@ let server = null;
 let haltGuard = null;
 let indicatorAlerts = null;
 let backtestQueue = null;
+let newsJob = null;
 
 // SIGTERM (systemctl stop/restart, deploy): stop taking requests, close log streams and
 // jobs, let running requests finish, close the DB pool. Forced exit after 10 s.
@@ -27,6 +28,7 @@ function shutdown(signal) {
   if (haltGuard) haltGuard.stop();
   if (indicatorAlerts) indicatorAlerts.stop();
   if (backtestQueue) backtestQueue.stop();
+  if (newsJob) newsJob.stop();
   for (const res of ctx.logStreams) res.end();
   const closeServer = server ? new Promise((resolve) => server.close(resolve)) : Promise.resolve();
   closeServer
@@ -61,6 +63,9 @@ ctx.settings.load().finally(() => {
     haltGuard = startHaltGuard(ctx);
     // Indicator alerts need candles, so they are checked every 5 minutes, not on each refresh.
     indicatorAlerts = startInterval('indicator alerts', 5 * 60 * 1000, () => ctx.alerts.evaluateIndicators(), log);
+    // News feeds every 15 minutes, the first time shortly after start.
+    newsJob = startInterval('news', 15 * 60 * 1000, () => ctx.news.refresh(), log);
+    setTimeout(() => !ctx.shuttingDown && ctx.news.refresh().catch((e) => log.warn({ error: e.message }, 'news refresh failed')), 30000).unref();
   }
   server = app.listen(config.port, config.host, (err) => {
     if (err) {

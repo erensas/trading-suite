@@ -152,7 +152,12 @@
               <div id="econ-box" class="econ-box muted">No signal for this pair.</div>
             </details>
 
-            <details class="card">
+            <details class="card" open id="insights-card">
+              <summary class="card-title"><i class="fa-solid fa-lightbulb"></i> Insights <span class="muted small" id="insights-tf"></span></summary>
+              <div id="insights-box" class="insights-box muted small">Waiting for candles…</div>
+            </details>
+
+            <details class="card" id="news-card">
               <summary class="card-title"><i class="fa-solid fa-newspaper"></i> News <span class="age" data-age="news"></span></summary>
               <div id="news-container" class="news-list"></div>
             </details>
@@ -378,6 +383,7 @@
           <button type="button" class="tf-btn" data-settings="providers">Data providers</button>
           <button type="button" class="tf-btn" data-settings="instruments">Instruments</button>
           <button type="button" class="tf-btn" data-settings="integrations">Integrations</button>
+          <button type="button" class="tf-btn" data-settings="news">News feeds</button>
         </div>
 
         <div class="settings-pane" id="settings-general">
@@ -428,6 +434,26 @@
                 <tbody id="instruments-tbody"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+
+        <div class="settings-pane hidden" id="settings-news">
+          <div class="card">
+            <div class="card-header wrap"><div class="card-title"><i class="fa-solid fa-rss"></i> News feeds <span class="muted small" id="news-job"></span></div><button type="button" class="pill pill-blue" id="btn-news-refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Refresh all now</button></div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>Feed</th><th>Kind</th><th>Category</th><th>Last fetch</th><th class="r">Items</th><th class="r">Stored</th><th>Latest article</th><th>On</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody id="news-feeds-tbody"></tbody>
+              </table>
+            </div>
+            <form id="news-feed-form" class="toolbar-row news-feed-form">
+              <input name="name" placeholder="Name" maxlength="60" required aria-label="Feed name">
+              <input name="url" type="url" placeholder="https://… RSS or Atom URL ({ticker} for per-symbol)" required aria-label="Feed URL">
+              <select name="kind" aria-label="Kind"><option value="feed">One feed</option><option value="per_symbol">Per TradFi symbol</option></select>
+              <select name="category" aria-label="Category"><option value="crypto">Crypto</option><option value="markets">Markets</option><option value="other">Other</option></select>
+              <button type="submit" class="btn-buy"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add feed</button>
+            </form>
+            <div class="hint">The news job reads every enabled feed every 15 minutes (https only, up to 3 MB), keeps 30 days, drops headlines already seen from another feed, and tags each article with the assets it names: tickers in capitals (BTC, $AAPL), common coin names (Bitcoin, Ether, Solana…) and the names of registered stocks. A per-symbol feed is read once for each active TradFi instrument, with <code>{ticker}</code> in its URL. The tone dot is a keyword count (surge, rally… vs. plunge, hack…), not a model.</div>
           </div>
         </div>
 
@@ -688,5 +714,7 @@
   <script src="strategies.js"></script>
   <script src="pine.js"></script>
   <script src="pine-ui.js"></script>
+  <script src="insights.js"></script>
+  <script src="insights-ui.js"></script>
 </body>
 </html>

@@ -79,6 +79,7 @@
     }
     TS.refreshVolume();
     if (TS.pine) TS.pine.onCandles();
+    if (TS.insights) TS.insights.onCandles();
     drawAlertLines();
     TS.renderLegend();
   }
@@ -103,7 +104,15 @@
       .join('');
   }
 
-  TS.studies = { rebuild, update, legend };
+  // From other panels (insights): add an indicator to the current layout and save it.
+  function addIndicator(id, params = {}) {
+    if (!DEFS[id]) return false;
+    TS.layout.indicators.push({ uid: uid(), id, params: Indicators.normalizeParams(id, params), colors: {}, visible: true });
+    changed();
+    return true;
+  }
+
+  TS.studies = { rebuild, update, legend, addIndicator };
 
   // ---- layout load / save -------------------------------------------------------------------
   async function loadLayout(symbol) {

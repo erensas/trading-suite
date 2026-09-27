@@ -6,7 +6,7 @@ const { toCsv } = require('../services/reports');
 const schemas = require('../schemas');
 
 module.exports = function reportRoutes(ctx) {
-  const { reports, settings, config, logStreams } = ctx;
+  const { reports, settings, config, logStreams, news } = ctx;
   const router = express.Router();
   const withSymbol = validate({ query: schemas.symbolQuery });
   const symbolOf = (req) => req.valid.query.symbol || settings.values.defaultSymbol;
@@ -24,8 +24,11 @@ module.exports = function reportRoutes(ctx) {
     res.json({ success: true, signal: await reports.economist(symbolOf(req)) });
   });
 
+  // The side panel's news: articles tagged with the symbol's asset (news_items), or the
+  // latest general ones when there are none.
   router.get('/api/trading/news', withSymbol, async (req, res) => {
-    res.json({ success: true, news: await reports.news(symbolOf(req)) });
+    const out = await news.list({ symbol: symbolOf(req), limit: 12 });
+    res.json({ success: true, asset: out.asset, general: out.general, news: out.items });
   });
 
   // Simulated test order from the Markets side panel (no exchange call).

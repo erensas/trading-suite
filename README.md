@@ -29,6 +29,11 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 - **Layouts** (`chart_layouts`): the indicator set is saved on the server. The default layout applies to every chart; "Only for this symbol" keeps a separate one for the current symbol, and unticking it goes back to the default. Volume on/off is part of the layout.
 - **Alerts** (bell button): price above/below, 24 h change above/below, or an indicator line above/below a level on a timeframe. Price and change alerts are checked after every price refresh, indicator alerts every 5 minutes on the last closed candle. One-off alerts switch off when they fire; repeating ones fire again after the condition was false once. Price alerts show as dotted lines on the chart. Fired alerts pop up as notifications and count on the bell until the alerts dialog is opened.
 
+### News and insights
+
+- **News** (`news_feeds`, `news_items`, migration 009): a job reads the enabled RSS / Atom feeds every 15 minutes (CoinDesk, Cointelegraph, Decrypt, The Block, Investing.com crypto, CNBC markets, and Yahoo Finance headlines once per active TradFi instrument), keeps 30 days, drops a headline already stored from another feed, and tags each article with the assets it names: tickers in capitals (`BTC`, `$AAPL`), common coin names (Bitcoin, Ether, Solana…) and the names of registered stocks. The side panel lists the articles for the chart's asset, or the latest general ones when none name it; the dot is a keyword tone (surge, rally… vs. plunge, hack…), not a model. Settings → News feeds adds, switches off, reads or deletes feeds (https only, no private addresses, 3 MB at most).
+- **Insights** (side panel, `public/insights.js`, also `GET /api/insights?symbol=&tf=`): rules on the chart's last 300 candles name the regime (uptrend or downtrend when ADX ≥ 25 and the EMAs and directional indicators agree; squeeze when the Bollinger width is in the lowest fifth of 120 bars; range when ADX < 20; otherwise mixed) with the numbers behind it, list RSI, MACD, EMA distance, ADX, ATR, 20-bar change and volume, suggest indicators for that regime (Add puts them on the chart) and the strategy templates that fit it (Backtest copies the template into the library and opens a backtest on this pair and timeframe), and count the week's articles about the asset. It describes the recent past; it is not a forecast.
+
 ### Pine editor
 
 The **Pine** button (or `P`) opens an editor under the chart. Scripts are stored in `pine_scripts` (migration 008, with four examples) and run in the browser on the chart's candles (`public/pine.js`), again on every refresh, symbol or timeframe change.
@@ -145,6 +150,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `006_chart_layouts_alerts.sql`: `chart_layouts`, `alerts`, `alert_events`.
 - `007_bots_strategies_backtests.sql`: `bots` (seeded with the main bot and the Web3 engine), `bot_events`, `strategies`, `strategy_versions`, `backtests`.
 - `008_pine_scripts.sql`: `pine_scripts` with four examples.
+- `009_news.sql`: `news_feeds` (seven feeds), `news_items`. The older `market_news_cache` table is no longer read.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 
@@ -157,17 +163,17 @@ src/context.js            builds the services (tests replace any of them)
 src/app.js                Express app: middleware, static files, routes, error handler
 src/http/                 security headers, request ids and logging, validation, control guard, errors
 src/schemas.js            zod schemas for every request body and query
-src/routes/               one file per area (health, settings, providers, market, instruments, charts, reports, integrations, control, strategies, bots, pine)
+src/routes/               one file per area (health, settings, providers, market, instruments, charts, reports, integrations, control, strategies, bots, pine, news)
 src/services/             database and upstream access (providers, instruments, market data, reports, control, Freqtrade, identity, audit,
                           sysd = systemctl --user and transient units, strategies, backtests, bots)
-src/jobs/                 ticker refresh, halt guard, interval runner
+src/jobs/                 ticker refresh, halt guard, interval runner (also: indicator alerts, backtest queue, news every 15 minutes)
 tools/                    Python helpers run with Freqtrade's virtualenv: strategy_check.py, bt_result.py, ts_guard.py
 strategy-templates/       starter strategies for the library
 systemd/                  unit template for managed bots, drop-ins for freqtrade.service and trading-suite.service
 lib/providers.js          provider adapters
 lib/resilience.js         rate limit and circuit breaker
 db/migrate.js             migration runner
-public/                   front end (indicators.js and pine.js are shared with the tests)
+public/                   front end (indicators.js, pine.js and insights.js are shared with the server and the tests)
 test/                     node:test suites (unit, http, db)
 ```
 

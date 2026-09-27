@@ -111,11 +111,6 @@ function createReports({ db, freqtrade, control, instruments, settings }) {
     return r.rows[0] || null;
   }
 
-  async function news(symbol) {
-    const r = await db.query('SELECT * FROM market_news_cache WHERE symbol = $1 OR symbol IS NULL ORDER BY published_at DESC LIMIT 10', [symbol]);
-    return r.rows;
-  }
-
   async function recordOrder(o) {
     const r = await db.query(
       `INSERT INTO manual_orders (symbol, side, order_type, amount, price, status, pnl_usd)
@@ -147,7 +142,7 @@ function createReports({ db, freqtrade, control, instruments, settings }) {
     return r.rows;
   }
 
-  return { overview, chartMarkers, economist, news, recordOrder, dexTrades, freqtradeTrades, exportTradeLogs };
+  return { overview, chartMarkers, economist, recordOrder, dexTrades, freqtradeTrades, exportTradeLogs };
 }
 
 const CSV_HEADER = 'id,tx_hash,token_address,action,amount_in,amount_out,gas_used,status,created_at';

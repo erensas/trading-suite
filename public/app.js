@@ -629,7 +629,8 @@ async function loadNews() {
   const box = $('news-container');
   try {
     const data = await api(`api/trading/news?symbol=${encodeURIComponent(TS.activeSymbol)}`);
-    box.innerHTML = data.news.length
+    if (TS.renderNews) box.innerHTML = TS.renderNews(data);
+    else box.innerHTML = data.news.length
       ? data.news
           .map((n) => `
             <div class="news-item">

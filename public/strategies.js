@@ -972,10 +972,12 @@ class ${name}(IStrategy):
     fillPairsList();
   }
 
-  async function prefillBacktest(name) {
+  async function prefillBacktest(name, { pairs, timeframe } = {}) {
     await loadLibrary({ quiet: true });
     fillBacktestForm();
     $('bt-form').strategy.value = name;
+    if (pairs && pairs.length) $('bt-form').pairs.value = pairs.join(', ');
+    if (timeframe !== undefined) $('bt-form').timeframe.value = timeframe || '';
     $('bt-form').pairs.focus();
   }
 

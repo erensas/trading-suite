@@ -37,8 +37,17 @@ module.exports = function marketRoutes({ instruments, marketData, settings, audi
 
   router.get('/api/trading/orderbook', validate({ query: schemas.symbolQuery }), async (req, res) => {
     const symbol = symbolOf(req);
-    const { provider, listing, book } = await marketData.orderbook(symbol).catch(asUpstream);
-    res.json({ success: true, symbol, provider: provider.name, listing, bids: book.bids, asks: book.asks });
+    let out;
+    try {
+      out = await marketData.orderbook(symbol);
+    } catch (e) {
+      // No source of this instrument has an order book (stocks): an answer, not an error.
+      if (e.unsupported) return res.json({ success: true, symbol, kind: 'none', message: e.message, bids: [], asks: [] });
+      return asUpstream(e);
+    }
+    const { kind, provider, listing } = out;
+    if (kind === 'amm') return res.json({ success: true, symbol, kind, provider: provider.name, listing, pool: out.pool, bids: [], asks: [] });
+    res.json({ success: true, symbol, kind, provider: provider.name, listing, bids: out.book.bids, asks: out.book.asks });
   });
 
   // Kept for existing callers (software_tester): Binance spot depth by exchange symbol.

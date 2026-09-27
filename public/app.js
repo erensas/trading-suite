@@ -591,6 +591,28 @@ function applyRoute(route) {
 TS.applyRoute = (hash) => applyRoute(parseRoute(hash));
 
 // ---- side panel ----------------------------------------------------------------
+// A DEX pool instead of an order book: liquidity, flow and the price impact of a trade.
+function renderPool(p) {
+  const pct = (v) => (v === null || v === undefined ? '-' : `<span class="${changeClass(v)}">${fmtPct(v)}</span>`);
+  const imp = (v) => (v >= 10 ? '> 10%' : `${v.toFixed(v < 0.1 ? 3 : 2)}%`);
+  const tx = p.transactions && p.transactions.h24;
+  const buyShare = tx && tx.buys + tx.sells ? Math.round((tx.buys / (tx.buys + tx.sells)) * 100) : null;
+  return `<div class="pool-head"><b>${esc(p.name)}</b> <span class="muted small">${esc(p.dex || '')} · ${esc(p.network)}</span></div>
+    <div class="kv-grid pool-kv">
+      <div class="kv"><div class="k">Liquidity</div><div class="v">${fmtUsd(p.liquidityUsd, 0)}</div></div>
+      <div class="kv"><div class="k">Volume 24 h</div><div class="v">${fmtUsd(p.volumeUsd.h24, 0)}</div></div>
+      <div class="kv"><div class="k">Volume 1 h</div><div class="v">${fmtUsd(p.volumeUsd.h1, 0)}</div></div>
+      <div class="kv"><div class="k">Change 1 h / 24 h</div><div class="v">${p.changePct ? `${pct(p.changePct.h1)} / ${pct(p.changePct.h24)}` : '-'}</div></div>
+      <div class="kv"><div class="k">Trades 24 h</div><div class="v">${tx ? `${tx.buys} buys · ${tx.sells} sells` : '-'}</div></div>
+      <div class="kv"><div class="k">Fee</div><div class="v">${p.feePct !== null ? `${p.feePct}%` : '-'}</div></div>
+    </div>
+    ${buyShare === null ? '' : `<div class="pool-flow" title="Share of buys in the last 24 h"><div class="buy" style="width:${buyShare}%"></div></div><div class="muted small">${buyShare}% of 24 h trades were buys</div>`}
+    ${p.impact.length ? `<div class="card-title small">Price impact of a market trade</div>
+    <div class="ob-header"><span>Size</span><span class="r">Buy</span><span class="r">Sell</span></div>
+    ${p.impact.map((i) => `<div class="ob-row"><span>${fmtUsd(i.usd, 0)}</span><span class="neg r">+${imp(i.buyPct)}</span><span class="pos r">−${imp(i.sellPct)}</span></div>`).join('')}
+    <div class="hint">Estimate for a constant-product pool holding this liquidity, fee included${p.concentrated ? '; this pool concentrates its liquidity near the price, so small trades move it less' : ''}. A DEX pool has no order book.</div>` : ''}`;
+}
+
 async function loadOrderbook() {
   const symbol = TS.activeSymbol;
   if (!symbol) return;
@@ -600,6 +622,22 @@ async function loadOrderbook() {
     const data = await api(`api/trading/orderbook?symbol=${encodeURIComponent(symbol)}`);
     if (symbol !== TS.activeSymbol) return;
     $('ob-provider').textContent = data.provider ? `· ${data.provider}` : '';
+    const isPool = data.kind === 'amm';
+    $('ob-pool').classList.toggle('hidden', !isPool);
+    $('ob-book').classList.toggle('hidden', isPool);
+    if (isPool) {
+      $('ob-pool').innerHTML = renderPool(data.pool);
+      markFresh('orderbook');
+      return;
+    }
+    if (data.kind === 'none') {
+      asks.innerHTML = '';
+      bids.innerHTML = '';
+      delete FRESH.orderbook;
+      renderAges('orderbook');
+      $('ob-mid-price').innerHTML = '<span class="muted small">No order book from this instrument\'s sources</span>';
+      return;
+    }
     const rows = (list, side) => {
       const top = list.slice(0, 8);
       const maxQty = Math.max(...top.map((x) => Number(x[1])), 0) || 1;
@@ -617,6 +655,8 @@ async function loadOrderbook() {
     markFresh('orderbook');
   } catch (e) {
     if (symbol !== TS.activeSymbol) return;
+    $('ob-pool').classList.add('hidden');
+    $('ob-book').classList.remove('hidden');
     asks.innerHTML = '';
     bids.innerHTML = '';
     $('ob-provider').textContent = '';

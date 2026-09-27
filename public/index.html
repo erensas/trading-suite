@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Trading Suite</title>
   <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:,">
   <script src="boot.js"></script>
   <link rel="stylesheet" href="vendor/fontawesome/css/fontawesome.min.css">
   <link rel="stylesheet" href="vendor/fontawesome/css/solid.min.css">
@@ -128,7 +129,8 @@
           <aside class="side-panel">
             <details class="card" open>
               <summary class="card-title"><i class="fa-solid fa-layer-group"></i> Order book <span class="muted" id="ob-provider"></span> <span class="age" data-age="orderbook"></span></summary>
-              <div class="orderbook-panel">
+              <div id="ob-pool" class="ob-pool hidden"></div>
+              <div class="orderbook-panel" id="ob-book">
                 <div class="ob-header"><span>Price</span><span class="r">Size</span><span class="r">Total</span></div>
                 <div id="ob-asks-container" class="ob-side asks"></div>
                 <div class="ob-mid" id="ob-mid-price">-</div>

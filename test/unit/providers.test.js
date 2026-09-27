@@ -89,3 +89,14 @@ test('rankMatches: exact base first, USDT before other quotes, prefix before sub
   assert.deepEqual(rankMatches(rows, 'btc/usdt').map((r) => `${r.base}/${r.quote}`), ['BTC/USDT']);
   assert.deepEqual(rankMatches(rows, ''), []);
 });
+
+test('ammImpact: constant-product price impact grows with size, fee added', () => {
+  const { ammImpact } = require('../../lib/providers');
+  const rows = ammImpact(2_000_000, 0.3); // 1M USD on each side
+  assert.deepEqual(rows.map((r) => r.usd), [100, 1000, 10000, 100000]);
+  // Buying 10k against 1M: (1.01^2 - 1) = 2.01 %, plus the 0.3 % fee.
+  assert.ok(Math.abs(rows[2].buyPct - 2.31) < 1e-9);
+  assert.ok(Math.abs(rows[2].sellPct - (1 - 1 / 1.01 ** 2) * 100 - 0.3) < 1e-9);
+  assert.ok(rows.every((r, i) => i === 0 || r.buyPct > rows[i - 1].buyPct));
+  assert.deepEqual(ammImpact(0), []);
+});

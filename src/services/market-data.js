@@ -56,19 +56,41 @@ function createMarketData({ instruments, providers }) {
     throw lastError;
   }
 
-  // The first source that has an order book.
+  // The first source that has an order book. A DEX pool has none; its pool data (liquidity,
+  // flow, estimated price impact) stands in, cached for a minute (GeckoTerminal allows about
+  // 30 calls a minute, and the side panel asks every few seconds).
+  const poolCache = new Map();
+  async function poolFrom(source) {
+    const key = `${source.provider.id}|${source.listing.id}`;
+    const hit = poolCache.get(key);
+    if (hit && Date.now() - hit.at < 60000) return hit.pool;
+    const pool = await providers.call(source.provider, 'pool', source.inst);
+    poolCache.set(key, { at: Date.now(), pool });
+    if (poolCache.size > CACHE_ENTRIES) poolCache.delete(poolCache.keys().next().value);
+    return pool;
+  }
+
   async function orderbook(symbol) {
     const sources = await instruments.sources(symbol);
     let lastError = null;
+    let amm = null;
     for (const source of sources) {
       try {
         const book = await providers.call(source.provider, 'orderbook', source.inst);
         if (!book.bids.length && !book.asks.length) throw new ProviderError(`${source.provider.name} returned an empty order book`);
-        return { provider: source.provider, listing: listingInfo(source), book };
+        return { kind: 'book', provider: source.provider, listing: listingInfo(source), book };
       } catch (e) {
         lastError = e;
+        if (!amm && e.unsupported && adapterFor(source.provider).pool) {
+          try {
+            amm = { kind: 'amm', provider: source.provider, listing: listingInfo(source), pool: await poolFrom(source) };
+          } catch (pe) {
+            lastError = pe;
+          }
+        }
       }
     }
+    if (amm) return amm;
     throw lastError;
   }
 

@@ -975,7 +975,29 @@ test('portfolio, wallets and Web3 pair controls', { skip }, async (t) => {
   assert.equal((await call('PUT', '/api/dex/pairs', { arbitrage_enabled: true })).status, 400, 'bulk needs ids, network or all');
   assert.equal((await call('GET', '/api/dex/pairs?network=base')).json.pairs[0].arbitrage_enabled, true);
   assert.equal((await call('PUT', '/api/dex/pairs', { all: true, flashloan_enabled: true })).json.updated, 3);
+  // Migration 012 marked only implausible scanner signals (none exist in a fresh schema).
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM trade_logs_synthetic_backup_20260927')).rows[0].n, 0);
   const audited = (await db.query("SELECT entity, after FROM suite_audit_log WHERE entity LIKE 'dex pair%' ORDER BY id")).rows;
   assert.equal(audited.length, 3);
   assert.equal(audited[0].after.flashloan_enabled, false);
+});
+
+test('migration 012 marks only implausible scanner signals', { skip }, async () => {
+  await resetSchema();
+  const migrations = migrate.readMigrations();
+  const upTo011 = migrations.filter((m) => m.version <= '011');
+  await withClient((c) => migrate.up(c, upTo011, quiet));
+  const pool = new Pool({ connectionString: URL_, max: 1 });
+  try {
+    await pool.query(`INSERT INTO trade_logs (tx_hash, action, amount_in, amount_out, status) VALUES
+      ('FLASHLOAN_SIGNAL_1', 'FLASHLOAN_ARBITRAGE_X', 25000, 26841.93, 'DRY_RUN_SIMULATED'),
+      ('FLASHLOAN_SIGNAL_2', 'FLASHLOAN_ARBITRAGE_X', 1000, 1002.08, 'DRY_RUN_SIMULATED'),
+      ('0xrealtx', 'BUY', 100, 900, 'SUCCESS')`);
+    await withClient((c) => migrate.up(c, migrations, quiet));
+    const rows = (await pool.query('SELECT tx_hash, status FROM trade_logs ORDER BY id')).rows;
+    assert.deepEqual(rows.map((r) => r.status), ['INVALID_SYNTHETIC', 'DRY_RUN_SIMULATED', 'SUCCESS']);
+    assert.equal((await pool.query('SELECT status FROM trade_logs_synthetic_backup_20260927')).rows[0].status, 'DRY_RUN_SIMULATED', 'the original row is kept for the undo');
+  } finally {
+    await pool.end();
+  }
 });

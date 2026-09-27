@@ -244,10 +244,29 @@ test('phase A without the bot and phase E fixes', async () => {
   await pop.phaseA();
   assert.match(pop.notes[0], /Freqtrade API not reachable/);
   await pop.phaseE();
-  assert.deepEqual(f.calls.update, [{ symbol: 'PEPE/WETH', network: 'eth' }], 'the network comes from the pool source prefix');
+  assert.ok(f.calls.sql.some((c) => /SET network = \$2/.test(c.sql) && c.params[0] === 'PEPE/WETH' && c.params[1] === 'eth'), 'the network comes from the pool source prefix');
   assert.ok(f.calls.sql.some((c) => /route_type = 'DEX'/.test(c.sql)));
   assert.deepEqual(f.calls.remove, [1], 'the provider-only Binance source goes, the explicit XRPUSDT one stays');
   assert.deepEqual(f.lst.get('XRP/USDT').map((l) => l.provider_symbol), ['XRPUSDT']);
+});
+
+test('phase C: a token address GeckoTerminal does not know is resolved by symbol, deep pools only', async () => {
+  const quiet = () => {};
+  const web3 = { networks: {}, core_pools: {}, tokens: { ethereum: { UNI: { address: '0xwrong', is_stable: false }, LDO: { address: '0xwrong2', is_stable: false } } } };
+  const f = fakeCtx({
+    providers: PROVIDERS,
+    geckoRows: [
+      { query: 'UNI', network: 'eth', base: 'UNI', quote: 'WETH', provider_symbol: 'eth:0xu1', liquidity_usd: 4e6, name: 'UNI / WETH 0.3%', contract_address: '0xreal' },
+      { query: 'LDO', network: 'eth', base: 'LDO', quote: 'WETH', provider_symbol: 'eth:0xl1', liquidity_usd: 5000, name: 'LDO / WETH', contract_address: '0xshallow' },
+    ],
+  });
+  const pop = createPopulator(f.ctx, { log: quiet });
+  await pop.load();
+  await pop.phaseC(web3);
+  assert.deepEqual(f.calls.create.map((c) => [c.symbol, c.contract_address]), [['UNI/WETH', '0xreal']], 'the real contract comes from the pool; the shallow LDO pool is not trusted');
+  assert.equal(pop.notes.length, 2);
+  assert.match(pop.notes[0], /UNI on eth: the Web3 map address 0xwrong is unknown to GeckoTerminal; registered with 0xreal/);
+  assert.match(pop.notes[1], /LDO on eth: GeckoTerminal knows no pool/);
 });
 
 test('ensureSource: a provider-only exchange source counts as the explicit market, a pool does not', async () => {

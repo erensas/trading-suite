@@ -47,6 +47,9 @@ const RENAMABLE_BASES = new Set(['ETH', 'BTC', 'SOL', 'BNB']);
 // this tool, so token searches are spaced out and a 429 is waited out, not given up on.
 const TOKEN_SEARCH_PACE_MS = Number(process.env.POPULATE_GECKO_PACE_MS || 8000);
 const RATE_LIMIT_RETRIES = 3;
+// A token whose address GeckoTerminal does not know is looked up by symbol on its network;
+// only a pool this deep is trusted to be the real token and not a namesake.
+const SYMBOL_LOOKUP_MIN_LIQUIDITY_USD = 100000;
 
 const upper = (s) => String(s || '').toUpperCase();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -270,14 +273,11 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
     return false;
   }
 
-  // The pools of a token on one network: GeckoTerminal's token endpoint first, the search
-  // (which only prefers the network) when that lists nothing; the rate limit is waited out.
-  async function geckoTokenPools(gecko, address, network) {
+  // A GeckoTerminal call with the rate limit waited out a few times.
+  async function geckoCall(fn) {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        const rows = await ctx.providers.call(gecko, 'tokenPools', network, address);
-        if (rows.length) return rows;
-        return await ctx.providers.call(gecko, 'search', address, { network });
+        return await fn();
       } catch (e) {
         if (!isRateLimit(e) || attempt >= RATE_LIMIT_RETRIES) throw e;
         const m = /retry in (\d+) s/.exec(e.message || '');
@@ -287,6 +287,14 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
       }
     }
   }
+  // The pools of a token on one network: GeckoTerminal's token endpoint first, the search
+  // (which only prefers the network) when that lists nothing.
+  const geckoTokenPools = (gecko, address, network) =>
+    geckoCall(async () => {
+      const rows = await ctx.providers.call(gecko, 'tokenPools', network, address);
+      return rows.length ? rows : ctx.providers.call(gecko, 'search', address, { network });
+    });
+  const geckoSearch = (gecko, query, network) => geckoCall(() => ctx.providers.call(gecko, 'search', query, { network }));
 
   async function phaseC(web3) {
     const gecko = provider('geckoterminal');
@@ -310,15 +318,31 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
           notes.push(`C: ${SYM} on ${G}: ${e.message}`);
           continue;
         }
-        const pick = pickTokenPool(rows, SYM, G);
+        let pick = pickTokenPool(rows, SYM, G);
+        let contract = token.address;
         if (!pick) {
-          notes.push(`C: ${SYM} on ${G}: GeckoTerminal lists no pool for ${token.address}`);
-          continue;
+          // The address is unknown to GeckoTerminal (the Web3 map may carry a wrong one):
+          // the deepest pool of that symbol on the network names the token instead.
+          let bySymbol;
+          try {
+            await sleep(TOKEN_SEARCH_PACE_MS);
+            bySymbol = await geckoSearch(gecko, SYM, G);
+          } catch (e) {
+            notes.push(`C: ${SYM} on ${G}: ${e.message}`);
+            continue;
+          }
+          pick = pickTokenPool(bySymbol, SYM, G);
+          if (!pick || pick.inverted || !pick.contract_address || !(pick.liquidity_usd >= SYMBOL_LOOKUP_MIN_LIQUIDITY_USD)) {
+            notes.push(`C: ${SYM} on ${G}: GeckoTerminal knows no pool for ${token.address} and no deep ${SYM} pool by symbol`);
+            continue;
+          }
+          contract = pick.contract_address;
+          notes.push(`C: ${SYM} on ${G}: the Web3 map address ${token.address} is unknown to GeckoTerminal; registered with ${contract} (${pick.name})`);
         }
         const symbol = `${SYM}/${pick.quote}`;
         await ensureInstrument('C', {
           symbol, category: 'DEX', name: String(pick.name || symbol).slice(0, 100), base_asset: SYM, quote_asset: pick.quote,
-          contract_address: token.address, network: G,
+          contract_address: contract, network: G,
         });
         await ensureSource('C', symbol, gecko, pick.provider_symbol, G);
         await ensureWatch('C', 'DEX pools', symbol);
@@ -385,7 +409,9 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
       if (!network) continue;
       say('E', `~ ${e.inst.symbol}: network ${network}`);
       counts.fixes += 1;
-      if (!dryRun) await ctx.instruments.update(e.inst.symbol, { network });
+      // Straight SQL: the service's update() upper-cases the symbol, which misses a row
+      // registered with a mixed-case token symbol (WETH/cirBTC).
+      if (!dryRun) await ctx.db.query('UPDATE instrument_registry SET network = $2, updated_at = NOW() WHERE symbol = $1', [e.inst.symbol, network]);
     }
     const sql = dryRun
       ? "SELECT count(*)::int AS n FROM instrument_registry WHERE category = 'DEX' AND route_type IS DISTINCT FROM 'DEX'"

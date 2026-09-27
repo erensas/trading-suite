@@ -1009,6 +1009,7 @@ async function init() {
   else chartMessage('No instruments yet. Press Ctrl+K to find and add one.');
   routing = false;
 
+  window.__tsBooted = true;
   const tab = route ? route.tab : storage.get('tab', 'chart');
   routing = true;
   showTab(tab);

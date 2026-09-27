@@ -5,6 +5,18 @@ module.exports = function healthRoutes(ctx) {
   const { db, freqtrade, settings, tickerRefresh } = ctx;
   const router = express.Router();
 
+  // Script errors from browsers (public/boot.js), into the service log. At most 60 a minute.
+  let clientLogs = { minute: 0, count: 0 };
+  router.post('/api/client-log', (req, res) => {
+    const minute = Math.floor(Date.now() / 60000);
+    if (clientLogs.minute !== minute) clientLogs = { minute, count: 0 };
+    if (++clientLogs.count <= 60) {
+      const b = req.body && typeof req.body === 'object' ? req.body : {};
+      req.log.warn({ client: { kind: String(b.kind || '').slice(0, 30), detail: JSON.stringify(b.detail || null).slice(0, 1500), url: String(b.url || '').slice(0, 200), ua: String(b.ua || '').slice(0, 300), secure: !!b.secure } }, 'browser report');
+    }
+    res.status(204).end();
+  });
+
   router.get(['/health', '/api/health'], (req, res) => {
     res.json({ status: 'ok', service: 'trading-suite', timestamp: new Date().toISOString() });
   });

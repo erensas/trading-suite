@@ -1,0 +1,8 @@
+# gitleaks settings for CI (.github/workflows/secret-scan.yml): the default rules, minus
+# test fixtures that hold fake keys and published test vectors on purpose.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake credentials and published test vectors in tests"
+paths = ['''^test/''']

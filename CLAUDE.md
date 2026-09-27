@@ -19,7 +19,7 @@ The trading dashboard of the OpenClaw VPS (`agents-s-2vcpu-4gb-ams3`): Node.js 2
 - Everything stored is in English: code, comments, UI text, commits, docs. Chat with Eren in Turkish.
 - Work on the VPS on `master`; no feature branches or pull requests. Commit messages start with `[BACKUP]`.
 - Back up before a system change: `sudo /usr/local/bin/daily_openclaw_backup.sh`; dump `trade_db` before a migration (deploy.sh does both).
-- No secrets in the repo. Exchange and venue keys live in `~/.openclaw/credentials/` (mode 600) and are written by the suite itself; the service connects to PostgreSQL over the Unix socket with peer auth.
+- No secrets in the repo. Exchange and venue keys live in `~/.openclaw/credentials/` (mode 600) and are written by the suite itself; the service connects to PostgreSQL over the Unix socket with peer auth. Host-wide rules (registry, rotation, commit guard): `docs/SECRETS.md` in openclaw-workspace.
 - Present a plan to Eren before changing the service unit, its drop-ins, the kill switch or anything that could trade.
 - Migrations are additive (`db/migrations/NNN_name.sql`); never edit an applied file, write a new one. A code rollback does not undo them.
 - `public/tokens.css` is an identical copy of the file in system-dashboard; change both repos in one go (deploy.sh refuses to deploy a split copy).

@@ -1,6 +1,6 @@
 # Trading Suite
 
-Web dashboard for the OpenClaw trading engines (Freqtrade, Web3 DEX bot): market charts per instrument, trade markers, engine status, kill switch, and the settings behind them. Node.js 22+ with Express 5 and PostgreSQL (`trade_db`), vanilla JS front end with TradingView Lightweight Charts.
+Web dashboard for the OpenClaw trading engines (Freqtrade, Web3 DEX bot): market charts per instrument, trade markers, engine status, kill switch, a strategy center (bots, strategy library, backtests, dry-run and live) and the settings behind them. Node.js 22+ with Express 5 and PostgreSQL (`trade_db`), vanilla JS front end with TradingView Lightweight Charts.
 
 Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on the tailnet at `/trading-suite/`.
 
@@ -8,6 +8,7 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 
 - **Markets**: watchlist, chart and side panel in one view. The watchlist panel switches between named lists (see below); the chart shows candles and volume from the instrument's data sources, overlays, and Freqtrade, Web3 and test-order markers. The side panel holds the order book (where a source has one), a simulated test order, the economist signal, news and a risk calculator.
 - **Screener**: every active instrument with price, 24 h change and volume, provider and economist score. Click a row to chart it.
+- **Strategies**: every bot with its mode (dry-run or live), state and strategy; managed Freqtrade bots; the strategy library with checks, an editor and backtests (see [Strategy center](#strategy-center)).
 - **Freqtrade**: live bot configuration, performance, whitelist and open trades from the Freqtrade API, plus trade history from `trade_db`.
 - **Web3 DEX** and **Logs**: Web3 executions and the live Web3 supervisor log. CEX trading is the Freqtrade view.
 - **Settings**:
@@ -30,11 +31,42 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 
 ### Links and keyboard
 
-- The address bar holds the view: `#markets/<pair>/<timeframe>` (pair URL-encoded, e.g. `#markets/BTC%2FUSDT/1h`), `#screener`, `#freqtrade`, `#dex`, `#settings/<general|providers|instruments|integrations>`, `#logs`; the shell adds `#system` and `#frequi`. Back and Forward move between views and pairs.
+- The address bar holds the view: `#markets/<pair>/<timeframe>` (pair URL-encoded, e.g. `#markets/BTC%2FUSDT/1h`), `#screener`, `#strategies/<bots|library|editor|backtests>`, `#freqtrade`, `#dex`, `#settings/<general|providers|instruments|integrations>`, `#logs`; the shell adds `#system` and `#frequi`. Back and Forward move between views and pairs.
 - Ctrl+K or `/` opens search, `I` the indicators; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
 - Every panel shows how old its data is; the label turns amber when an update failed or the data is older than expected, and failed panels have a Retry button.
 - Prices below 0.001 use subscript zeros (`0.0₅436` = 0.00000436); changes carry ▲ / ▼ as well as colour.
 - The chart legend shows OHLCV for the bar under the cursor. With "Trades" on, open Freqtrade trades on the pair are drawn as entry, stop-loss and liquidation lines.
+
+## Strategy center
+
+The Strategies tab covers every trading engine in one place.
+
+- **Bots** (`bots` table): the main Freqtrade bot (`freqtrade.service`), the Web3 DEX engine (read-only, from its `engine_status` heartbeat) and **managed bots**. Each card shows the mode (DRY-RUN or LIVE), the trading-loop state from the bot's API, the strategy, open trades and closed profit. **Start / Pause / Stop** act on the trading loop (Pause keeps managing open trades and blocks new entries; Stop leaves them unmanaged). **Details** has the strategy switch, controls, settings, the live-trading checks, the event history (`bot_events`) and the journal.
+- **Switching strategy**: the suite writes `strategy` (and `strategy_path` for library strategies) into the bot's config, keeps the previous file in `~/.openclaw/bots/config-backups`, calls `/api/v1/reload_config` and waits until the bot reports the new strategy; otherwise the old config goes back. Open trades stay open and follow the new strategy's exit rules. Only checked strategies can be chosen, and a live bot keeps its strategy. For the main bot this needs the drop-in `systemd/freqtrade-strategy-from-config.conf` (no `--strategy` on the command line; see *Host setup*).
+- **Managed bots** (New bot): a Freqtrade instance per bot, run by the openclaw user's systemd manager as `freqtrade-bot@<name>` (`systemd/freqtrade-bot@.service`: 450 MB memory limit, 60 % CPU, no new privileges). The suite writes `~/.openclaw/bots/instances/<name>/config.json` (own API port from 8090, own SQLite trade database, `strategy_path` = the library), and generates API credentials into `~/.openclaw/credentials/bots/<name>.env` (0600), which the unit loads. Every bot starts in dry-run. At most 3 managed bots (`MAX_MANAGED_BOTS`), and a bot is only started when at least 450 MB of memory is free (`BOT_MIN_FREE_MB`). Deleting a bot stops it and moves its folder and credentials to trash folders.
+- **Strategy library** (`strategies`, `strategy_versions`): Freqtrade strategies written in the editor, uploaded as `.py`, copied from the templates in `strategy-templates/` (EMA cross, RSI mean reversion, MACD trend, Bollinger breakout) or from the main bot's folder. Files are written to `~/.openclaw/bots/strategies` together with `ts_guard.py`; every save is a version. Before bots may use a strategy it has to pass its **check** (`tools/strategy_check.py`, in a sandboxed transient unit): static rules (no subprocess, socket, ctypes, pickle, eval/exec, dangerous `os` calls, dunder tricks; network libraries and file writes are warnings), loading through Freqtrade's resolver, and a run of the populate functions on 500 sample candles with the signal counts.
+- **Editor**: CodeMirror with Python highlighting, versions, Save (Ctrl+S) and Save & check, and a new-strategy dialog (blank example, template or copy).
+- **Backtests** (`backtests`): strategy, pairs, timeframe, days, exchange, market, stake, max open trades and wallet. Runs are queued and run one at a time as transient user units with memory and time limits: `freqtrade download-data` (only missing candles, with extra history for indicator warm-up) into `~/.openclaw/bots/data/<exchange>`, `freqtrade backtesting`, then `tools/bt_result.py` stores the summary, per-pair and exit-reason tables, up to 1000 trades and the daily profit. The result view has the key figures (profit, drawdown, win rate, profit factor, Sharpe, Sortino, CAGR, market change) and an equity curve. `BACKTEST_WORKER` decides which process runs the queue (default: the one with background jobs).
+- **Kill switch**: halting pauses every Freqtrade bot through its API (a managed bot that cannot be paused is stopped) and records a `kill_switch_pause` event; the halt guard re-pauses any bot that reports running while halted; resume starts only the bots the kill switch paused. Library strategies also call `ts_guard.entries_allowed()` in `confirm_trade_entry`, which reads `trading_control` and refuses entries while halted (fails closed); the check warns when a strategy does not.
+- **Going live** (managed bots only; the main bot stays in dry-run): Details → Live trading lists the checks, and Go live stays disabled until every one passes: strategy checked; a finished backtest of the same strategy version with at least 10 trades and no loss; at least 7 days of dry-run with this strategy and 5 closed dry-run trades; exchange API keys set; a capital limit that covers stake × max open trades; trading not halted. Exchange keys are write-only: they go into the bot's credentials file as `FREQTRADE__EXCHANGE__KEY/SECRET/PASSWORD` and the API only answers whether they are set, with the key's last four characters. Confirming takes typing `LIVE <name>`; the bot then restarts with `dry_run: false`, `available_capital` = the capital limit and a separate `trades.live.sqlite`. Back to dry-run restarts it with its dry-run database. The limits are environment variables (`LIVE_MIN_DRY_RUN_DAYS`, `LIVE_MIN_BACKTEST_TRADES`, `LIVE_MIN_DRY_RUN_TRADES`).
+
+### Host setup
+
+The suite runs as openclaw and uses that user's systemd manager (lingering is on) through `XDG_RUNTIME_DIR=/run/user/1000`; no sudo.
+
+```bash
+# Unit template for managed bots
+install -m 644 systemd/freqtrade-bot@.service ~openclaw/.config/systemd/user/   # as openclaw
+systemctl --user daemon-reload                                                  # as openclaw, XDG_RUNTIME_DIR=/run/user/1000
+# Main bot: strategy from config.json instead of --strategy (restart the bot once afterwards)
+sudo install -m 644 systemd/freqtrade-strategy-from-config.conf /etc/systemd/system/freqtrade.service.d/strategy-from-config.conf
+# Write access for the suite: ReadWritePaths in systemd/trading-suite-hardening.conf
+sudo install -m 644 systemd/trading-suite-hardening.conf /etc/systemd/system/trading-suite.service.d/hardening.conf
+sudo install -d -m 700 -o openclaw -g openclaw ~openclaw/.openclaw/credentials/bots
+sudo systemctl daemon-reload
+```
+
+Paths and limits come from the environment: `BOTS_DIR`, `BOT_CREDENTIALS_DIR`, `FREQTRADE_BIN`, `FREQTRADE_PYTHON`, `MAIN_STRATEGIES_DIR`, `BOT_PORT_BASE`, `BOT_MEMORY_MAX`, `BACKTEST_MEMORY_MAX` (see `src/config.js`).
 
 ## Data providers
 
@@ -78,7 +110,9 @@ Every provider call goes through `lib/resilience.js`:
 - The service connects to PostgreSQL over the Unix socket with peer authentication, so it needs no DB password.
 - Front-end libraries (Font Awesome, Lightweight Charts, Inter and JetBrains Mono) are npm dependencies served from `node_modules` under `/vendor`; the page loads nothing from other hosts, and the Content-Security-Policy allows only `'self'` for scripts, styles and fonts.
 - Changes to settings, providers, instruments, sources and watchlists are written to `suite_audit_log` with the caller's Tailscale login and device.
-- Freqtrade API credentials come from `~/.openclaw/credentials/freqtrade.env`.
+- Freqtrade API credentials come from `~/.openclaw/credentials/freqtrade.env`; managed bots' API credentials and exchange keys from `~/.openclaw/credentials/bots/<name>.env` (0600, generated or written by the suite, never returned by the API).
+- Strategies, backtests and strategy checks run as transient user units with memory, task and time limits and `NoNewPrivileges`, never inside the web process. `trading-suite.service` itself may write only `~/.openclaw/bots`, `~/.openclaw/credentials/bots` and the main bot's `config.json` in `/home` (`ReadWritePaths`).
+- Bot and strategy changes go to `suite_audit_log` and, per bot, `bot_events`.
 
 ## Database
 
@@ -99,6 +133,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `004_suite_audit_log.sql`: audit log of UI changes.
 - `005_listings_watchlists.sql`: `instrument_listings` (several sources per instrument, copied from the old single provider), `watchlists` and `watchlist_items` with starter lists.
 - `006_chart_layouts_alerts.sql`: `chart_layouts`, `alerts`, `alert_events`.
+- `007_bots_strategies_backtests.sql`: `bots` (seeded with the main bot and the Web3 engine), `bot_events`, `strategies`, `strategy_versions`, `backtests`.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 
@@ -111,9 +146,13 @@ src/context.js            builds the services (tests replace any of them)
 src/app.js                Express app: middleware, static files, routes, error handler
 src/http/                 security headers, request ids and logging, validation, control guard, errors
 src/schemas.js            zod schemas for every request body and query
-src/routes/               one file per area (health, settings, providers, market, reports, integrations, control)
-src/services/             database and upstream access (providers, instruments, market data, reports, control, Freqtrade, identity, audit)
-src/jobs/                 ticker refresh, halt guard
+src/routes/               one file per area (health, settings, providers, market, instruments, charts, reports, integrations, control, strategies, bots)
+src/services/             database and upstream access (providers, instruments, market data, reports, control, Freqtrade, identity, audit,
+                          sysd = systemctl --user and transient units, strategies, backtests, bots)
+src/jobs/                 ticker refresh, halt guard, interval runner
+tools/                    Python helpers run with Freqtrade's virtualenv: strategy_check.py, bt_result.py, ts_guard.py
+strategy-templates/       starter strategies for the library
+systemd/                  unit template for managed bots, drop-ins for freqtrade.service and trading-suite.service
 lib/providers.js          provider adapters
 lib/resilience.js         rate limit and circuit breaker
 db/migrate.js             migration runner

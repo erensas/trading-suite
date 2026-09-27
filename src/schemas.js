@@ -236,7 +236,39 @@ const halt = z.object({ reason: z.string().trim().max(200).optional() });
 const resume = z.object({ confirm: z.literal('RESUME', { error: 'Type RESUME to confirm' }) });
 const serviceParams = z.object({ id: z.string().max(100), action: z.string().max(20) });
 
+// ---- strategy center ------------------------------------------------------------------------
+const STRATEGY_NAME = /^[A-Za-z_][A-Za-z0-9_]{2,60}$/;
+const BOT_NAME = /^[a-z0-9][a-z0-9-]{1,29}$/;
+const strategyParam = z.object({ name: z.string().regex(STRATEGY_NAME, 'name must be a Python class name') });
+const botParam = z.object({ name: z.string().regex(BOT_NAME, 'unknown bot name') });
+const strategySource = z.object({ source: z.string().min(1).max(210000), description: optionalText(200) });
+const strategyImport = z.object({ kind: z.enum(['template', 'main']), name: z.string().regex(STRATEGY_NAME) });
+const versionParams = strategyParam.extend({ id: z.coerce.number().int().positive() });
+const BOT_ACTIONS = ['start', 'stop', 'pause', 'reload', 'start_process', 'stop_process', 'restart_process'];
+const botAction = z.object({ action: z.enum(BOT_ACTIONS, { error: `action must be one of ${BOT_ACTIONS.join(', ')}` }) });
+const botStrategy = z.object({ strategy: z.string().regex(STRATEGY_NAME, 'strategy must be a class name') });
+const botDelete = z.object({ confirm: z.string().max(40) });
+const journalQuery = z.object({ lines: z.coerce.number().int().min(10).max(2000).default(200) });
+const goLive = z.object({ confirm: z.string().max(60) });
+const exchangeKeys = z.object({ key: z.string().max(256), secret: z.string().max(256), password: z.string().max(128).nullish() });
+const capitalLimit = z.object({ amount: z.coerce.number().positive().max(1e7) });
+const backtestsQuery = z.object({ strategy: z.string().regex(STRATEGY_NAME).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
+
 module.exports = {
+  strategyParam,
+  botParam,
+  strategySource,
+  strategyImport,
+  versionParams,
+  BOT_ACTIONS,
+  botAction,
+  botStrategy,
+  botDelete,
+  journalQuery,
+  goLive,
+  exchangeKeys,
+  capitalLimit,
+  backtestsQuery,
   SETTING_RULES,
   SETTING_SCHEMAS,
   settingsPatch,

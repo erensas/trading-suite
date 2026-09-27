@@ -1,0 +1,36 @@
+# ~/.config/systemd/user/freqtrade-bot@.service (the openclaw user's systemd manager)
+#
+# A managed Freqtrade bot created by trading-suite (Strategies tab). %i is the bot name; the
+# suite writes its config to ~/.openclaw/bots/instances/%i/config.json and its API
+# credentials (and exchange keys once set) to ~/.openclaw/credentials/bots/%i.env (0600).
+# Install: see the trading-suite README, "Managed bots".
+[Unit]
+Description=Managed Freqtrade bot %i (trading-suite)
+After=default.target
+StartLimitIntervalSec=900
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.openclaw/bots/instances/%i
+EnvironmentFile=%h/.openclaw/credentials/bots/%i.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/openclaw/.openclaw/worktrees/d89946a92f485818/freqtrade/.venv/bin/freqtrade trade --config %h/.openclaw/bots/instances/%i/config.json --userdir %h/.openclaw/bots/instances/%i/user_data
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=60
+# Freqtrade shuts down cleanly on SIGINT and then exits with 130.
+KillSignal=SIGINT
+SuccessExitStatus=130
+
+# Limits: a 2 vCPU / 4 GB host that also runs the main bot, the web3 engine and Postgres.
+MemoryHigh=380M
+MemoryMax=450M
+TasksMax=64
+CPUQuota=60%
+Nice=5
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

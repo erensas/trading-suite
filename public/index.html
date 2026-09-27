@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="vendor/fonts/inter/index.css">
   <link rel="stylesheet" href="vendor/fonts/jetbrains-mono/index.css">
   <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="vendor/codemirror/lib/codemirror.css">
   <link rel="stylesheet" href="style.css">
   <script src="vendor/lightweight-charts/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -42,6 +43,7 @@
       <div class="nav-tabs" role="tablist" aria-label="Trading views" id="nav-tabs">
         <button type="button" class="tab-btn active" data-tab="chart" role="tab" id="tabbtn-chart" aria-controls="tab-chart" aria-selected="true" tabindex="0"><i class="fa-solid fa-chart-column" aria-hidden="true"></i> Markets</button>
         <button type="button" class="tab-btn" data-tab="screener" role="tab" id="tabbtn-screener" aria-controls="tab-screener" aria-selected="false" tabindex="-1"><i class="fa-solid fa-list-check" aria-hidden="true"></i> Screener</button>
+        <button type="button" class="tab-btn" data-tab="strategies" role="tab" id="tabbtn-strategies" aria-controls="tab-strategies" aria-selected="false" tabindex="-1"><i class="fa-solid fa-chess-knight" aria-hidden="true"></i> Strategies</button>
         <button type="button" class="tab-btn" data-tab="freqtrade" role="tab" id="tabbtn-freqtrade" aria-controls="tab-freqtrade" aria-selected="false" tabindex="-1"><i class="fa-solid fa-robot" aria-hidden="true"></i> Freqtrade</button>
         <button type="button" class="tab-btn" data-tab="dex" role="tab" id="tabbtn-dex" aria-controls="tab-dex" aria-selected="false" tabindex="-1"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Web3 DEX</button>
         <button type="button" class="tab-btn" data-tab="settings" role="tab" id="tabbtn-settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Settings</button>
@@ -165,6 +167,124 @@
               <thead><tr><th>Symbol</th><th>Category</th><th>Exchange</th><th>Sources</th><th class="r">Last price</th><th class="r">24h</th><th class="r">24h volume</th><th>Economist</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
               <tbody id="screener-tbody"><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Strategy center: bots, strategy library, editor, backtests -->
+      <section id="tab-strategies" class="tab-content hidden" role="tabpanel" aria-labelledby="tabbtn-strategies">
+        <div class="settings-nav tf-btn-group" id="strat-nav" role="group" aria-label="Strategy center">
+          <button type="button" class="tf-btn active" data-pane="bots" aria-pressed="true"><i class="fa-solid fa-robot" aria-hidden="true"></i> Bots</button>
+          <button type="button" class="tf-btn" data-pane="library" aria-pressed="false"><i class="fa-solid fa-book" aria-hidden="true"></i> Strategy library</button>
+          <button type="button" class="tf-btn" data-pane="editor" aria-pressed="false"><i class="fa-solid fa-code" aria-hidden="true"></i> Editor</button>
+          <button type="button" class="tf-btn" data-pane="backtests" aria-pressed="false"><i class="fa-solid fa-flask" aria-hidden="true"></i> Backtests</button>
+        </div>
+
+        <div class="strat-pane" id="strat-bots">
+          <div class="card">
+            <div class="card-header wrap">
+              <div class="card-title"><i class="fa-solid fa-robot" aria-hidden="true"></i> Bots <span class="age" data-age="bots"></span></div>
+              <span class="toolbar-row">
+                <button type="button" class="pill pill-green" id="btn-new-bot"><i class="fa-solid fa-plus" aria-hidden="true"></i> New bot</button>
+                <button type="button" class="pill pill-blue" id="btn-refresh-bots" aria-label="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i></button>
+              </span>
+            </div>
+            <div id="bots-grid" class="bots-grid"><div class="skeleton sk-line"></div></div>
+            <div class="hint">Every bot starts in dry-run. <b>Start / Pause / Stop</b> act on the trading loop through the bot's API; a managed bot's process runs as the user unit <code>freqtrade-bot@&lt;name&gt;</code>. The kill switch pauses every bot and resume starts only the ones it paused. A bot can trade live only after it passes every check under <b>Details → Live trading</b>.</div>
+          </div>
+        </div>
+
+        <div class="strat-pane hidden" id="strat-library">
+          <div class="card">
+            <div class="card-header wrap">
+              <div class="card-title"><i class="fa-solid fa-book" aria-hidden="true"></i> Strategy library</div>
+              <span class="toolbar-row">
+                <button type="button" class="pill pill-green" id="btn-new-strategy"><i class="fa-solid fa-plus" aria-hidden="true"></i> New strategy</button>
+                <label class="pill pill-blue file-pill"><i class="fa-solid fa-upload" aria-hidden="true"></i> Upload .py<input type="file" id="strategy-upload" accept=".py,text/x-python" class="sr-only"></label>
+              </span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>Strategy</th><th>Origin</th><th>TF</th><th>Check</th><th>Last backtest</th><th>Used by</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody id="library-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title"><i class="fa-solid fa-box-open" aria-hidden="true"></i> Templates and the main bot's files</div></div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>Strategy</th><th>From</th><th>Description</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody id="templates-tbody"></tbody>
+              </table>
+            </div>
+            <div class="hint">Copying puts the file into the library (<code>~/.openclaw/bots/strategies</code>), where managed bots and backtests load it from. Bots use a library strategy only after its check has passed: static rules (no processes, shells, sockets, eval), loading through Freqtrade, and a run on 500 sample candles, in a sandboxed unit.</div>
+          </div>
+        </div>
+
+        <div class="strat-pane hidden" id="strat-editor">
+          <div class="card editor-card">
+            <div class="card-header wrap">
+              <div class="toolbar-row">
+                <select id="editor-select" aria-label="Strategy to edit"></select>
+                <select id="editor-versions" aria-label="Versions"></select>
+                <span class="muted small" id="editor-state"></span>
+              </div>
+              <div class="toolbar-row">
+                <button type="button" class="btn-secondary" id="editor-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save</button>
+                <button type="button" class="btn-buy" id="editor-save-check"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Save &amp; check</button>
+                <button type="button" class="btn-secondary" id="editor-backtest"><i class="fa-solid fa-flask" aria-hidden="true"></i> Backtest</button>
+              </div>
+            </div>
+            <div id="editor-box" class="editor-box"></div>
+            <div id="editor-check" class="check-out hidden" role="status"></div>
+            <div class="hint">Ctrl+S saves. A strategy should end <code>confirm_trade_entry</code> with <code>return entries_allowed(pair)</code> (from <code>ts_guard</code>), so it opens nothing while trading is halted, even before the bot is paused.</div>
+          </div>
+        </div>
+
+        <div class="strat-pane hidden" id="strat-backtests">
+          <div class="bt-layout">
+            <form id="bt-form" class="card bt-form">
+              <div class="card-title"><i class="fa-solid fa-flask" aria-hidden="true"></i> New backtest</div>
+              <label>Strategy<select name="strategy" required></select></label>
+              <label>Pairs <span class="muted small">(comma separated)</span><input name="pairs" required placeholder="BTC/USDT, ETH/USDT" list="bt-pairs" autocomplete="off"></label>
+              <datalist id="bt-pairs"></datalist>
+              <div class="bt-row">
+                <label>Timeframe<select name="timeframe"></select></label>
+                <label>Days<input name="days" type="number" min="3" max="730" value="90"></label>
+              </div>
+              <div class="bt-row">
+                <label>Exchange<select name="exchange"></select></label>
+                <label>Market<select name="trading_mode"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
+              </div>
+              <div class="bt-row">
+                <label>Stake<input name="stake_amount" type="number" min="1" step="any" value="100"></label>
+                <label>Max open<input name="max_open_trades" type="number" min="1" max="50" value="3"></label>
+                <label>Wallet<input name="wallet" type="number" min="1" step="any" value="1000"></label>
+              </div>
+              <button type="submit" class="btn-buy"><i class="fa-solid fa-play" aria-hidden="true"></i> Run backtest</button>
+              <div class="hint">Runs one at a time in a sandboxed unit (memory and time limits). Missing candles are downloaded first, with extra history for indicator warm-up.</div>
+            </form>
+            <div class="card">
+              <div class="card-header"><div class="card-title"><i class="fa-solid fa-list" aria-hidden="true"></i> Runs</div><label class="inline-label">Strategy <select id="bt-filter" aria-label="Filter by strategy"><option value="">All</option></select></label></div>
+              <div class="table-container">
+                <table>
+                  <thead><tr><th>#</th><th>Strategy</th><th>Pairs</th><th>Period</th><th>Status</th><th class="r">Trades</th><th class="r">Profit</th><th class="r">Max DD</th><th class="r">Win</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                  <tbody id="bt-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="card hidden" id="bt-detail">
+            <div class="card-header wrap"><div class="card-title" id="bt-detail-title"></div><button type="button" class="icon-btn" id="bt-detail-close" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+            <div id="bt-kpis" class="kv-grid"></div>
+            <div id="bt-equity" class="bt-equity" aria-label="Equity curve"></div>
+            <div class="grid-2">
+              <div><div class="card-title small">Per pair</div><div class="table-container"><table><thead><tr><th>Pair</th><th class="r">Trades</th><th class="r">Profit</th><th class="r">Win</th><th class="r">Avg</th></tr></thead><tbody id="bt-pairs-tbody"></tbody></table></div></div>
+              <div><div class="card-title small">Exit reasons</div><div class="table-container"><table><thead><tr><th>Reason</th><th class="r">Trades</th><th class="r">Profit</th><th class="r">Win</th></tr></thead><tbody id="bt-exits-tbody"></tbody></table></div></div>
+            </div>
+            <details class="bt-trades"><summary>Trades</summary><div class="table-container"><table><thead><tr><th>Pair</th><th>Opened</th><th>Closed</th><th class="r">Profit</th><th class="r">Abs</th><th>Exit</th></tr></thead><tbody id="bt-trades-tbody"></tbody></table></div></details>
+            <details class="bt-log"><summary>Run log</summary><pre id="bt-log" class="log-box short"></pre></details>
           </div>
         </div>
       </section>
@@ -465,6 +585,49 @@
     </div>
   </div>
 
+  <!-- One bot: strategy, controls, settings, live trading, events, journal -->
+  <div id="bot-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="bot-title">
+    <div class="modal-card xwide bot-card-modal">
+      <div class="modal-head-row"><div id="bot-title" class="modal-title"></div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div id="bot-body" class="bot-body"></div>
+    </div>
+  </div>
+
+  <!-- New managed bot -->
+  <div id="newbot-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="newbot-title">
+    <form class="modal-card wide" id="newbot-form">
+      <div class="modal-head-row"><div id="newbot-title" class="modal-title">New bot</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="form-grid single">
+        <label>Name<input name="name" required pattern="[a-z0-9][a-z0-9\-]{1,29}" placeholder="ema-majors" maxlength="30"></label>
+        <label>Strategy<select name="strategy" required></select></label>
+        <label>Exchange<select name="exchange"></select></label>
+        <label>Market<select name="trading_mode"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
+        <label class="full">Pairs <span class="muted small">(comma separated)</span><input name="pairs" required placeholder="BTC/USDT, ETH/USDT" list="bt-pairs" autocomplete="off"></label>
+        <label>From a watchlist<select name="fromList"><option value="">-</option></select></label>
+        <label>Timeframe<select name="timeframe"></select></label>
+        <label>Stake per trade<input name="stake_amount" type="number" min="1" step="any" value="50"></label>
+        <label>Max open trades<input name="max_open_trades" type="number" min="1" max="20" value="3"></label>
+        <label>Dry-run wallet<input name="dry_run_wallet" type="number" min="1" step="any" value="1000"></label>
+        <label class="full">Description<input name="description" maxlength="200"></label>
+        <label class="check full"><input type="checkbox" name="start" checked> Start after creating</label>
+      </div>
+      <div class="hint" id="newbot-hint"></div>
+      <div id="newbot-error" class="form-error hidden"></div>
+      <div class="modal-actions"><button type="button" class="btn-secondary" data-close-modal>Cancel</button><button type="submit" class="btn-buy"><i class="fa-solid fa-rocket" aria-hidden="true"></i> Create (dry-run)</button></div>
+    </form>
+  </div>
+
+  <!-- New strategy -->
+  <div id="newstrat-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="newstrat-title">
+    <form class="modal-card" id="newstrat-form">
+      <div class="modal-head-row"><div id="newstrat-title" class="modal-title">New strategy</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <label>Class name<input name="name" required pattern="[A-Za-z_][A-Za-z0-9_]{2,60}" placeholder="MyTrendStrategy"></label>
+      <label>Start from<select name="from"></select></label>
+      <div id="newstrat-error" class="form-error hidden"></div>
+      <div class="modal-actions"><button type="button" class="btn-secondary" data-close-modal>Cancel</button><button type="submit" class="btn-buy">Open in the editor</button></div>
+    </form>
+  </div>
+
   <div id="toast-container" role="status" aria-live="polite"></div>
 
   <script src="shell.js"></script>
@@ -473,5 +636,8 @@
   <script src="watchlists.js"></script>
   <script src="studies.js"></script>
   <script src="settings.js"></script>
+  <script src="vendor/codemirror/lib/codemirror.js"></script>
+  <script src="vendor/codemirror/mode/python/python.js"></script>
+  <script src="strategies.js"></script>
 </body>
 </html>

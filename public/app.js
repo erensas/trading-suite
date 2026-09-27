@@ -502,10 +502,10 @@ function markTimeframe() {
 }
 
 // ---- URL state ------------------------------------------------------------------------
-// #markets/<pair>/<tf>, #screener, #freqtrade, #dex, #settings/<pane>, #logs. The shell
+// #markets/<pair>/<tf>, #screener, #strategies/<pane>, #freqtrade, #dex, #settings/<pane>, #logs. The shell
 // owns #system and #frequi. Tab and pair changes add a history entry (Back works), a
 // timeframe change replaces it.
-const ROUTE_OF_TAB = { chart: 'markets', screener: 'screener', freqtrade: 'freqtrade', dex: 'dex', settings: 'settings', logs: 'logs' };
+const ROUTE_OF_TAB = { chart: 'markets', screener: 'screener', strategies: 'strategies', freqtrade: 'freqtrade', dex: 'dex', settings: 'settings', logs: 'logs' };
 const TAB_OF_ROUTE = Object.fromEntries(Object.entries(ROUTE_OF_TAB).map(([t, r]) => [r, t]));
 let routing = false;
 
@@ -513,6 +513,7 @@ function currentRoute() {
   const route = ROUTE_OF_TAB[TS.activeTab] || 'markets';
   if (route === 'markets' && TS.activeSymbol) return `markets/${encodeURIComponent(TS.activeSymbol)}/${TS.activeTf}`;
   if (route === 'settings') return `settings/${TS.settingsPane || 'general'}`;
+  if (route === 'strategies') return `strategies/${TS.strategiesPane || 'bots'}`;
   return route;
 }
 function syncUrl(push) {
@@ -537,6 +538,7 @@ function parseRoute(hash) {
     route.tf = TIMEFRAMES.includes(b) ? b : null;
   }
   if (tab === 'settings' && a) route.pane = a;
+  if (tab === 'strategies' && a) route.stratPane = a;
   return route;
 }
 function applyRoute(route) {
@@ -544,6 +546,7 @@ function applyRoute(route) {
   routing = true;
   try {
     if (route.pane && TS.setSettingsPane) TS.setSettingsPane(route.pane);
+    if (route.stratPane && TS.setStrategiesPane) TS.setStrategiesPane(route.stratPane);
     if (route.tf && route.tf !== TS.activeTf) {
       TS.activeTf = route.tf;
       markTimeframe();
@@ -974,6 +977,7 @@ async function init() {
   TS.activeTf = tf;
   markTimeframe();
   if (route && route.pane && TS.setSettingsPane) TS.setSettingsPane(route.pane);
+  if (route && route.stratPane && TS.setStrategiesPane) TS.setStrategiesPane(route.stratPane);
   routing = true;
   if (symbol) selectPair(symbol);
   else chartMessage('No instruments yet. Press Ctrl+K to find and add one.');

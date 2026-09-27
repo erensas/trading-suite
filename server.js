@@ -11,6 +11,7 @@ const app = createApp(ctx);
 let server = null;
 let haltGuard = null;
 let indicatorAlerts = null;
+let backtestQueue = null;
 
 // SIGTERM (systemctl stop/restart, deploy): stop taking requests, close log streams and
 // jobs, let running requests finish, close the DB pool. Forced exit after 10 s.
@@ -25,6 +26,7 @@ function shutdown(signal) {
   ctx.tickerRefresh.stop();
   if (haltGuard) haltGuard.stop();
   if (indicatorAlerts) indicatorAlerts.stop();
+  if (backtestQueue) backtestQueue.stop();
   for (const res of ctx.logStreams) res.end();
   const closeServer = server ? new Promise((resolve) => server.close(resolve)) : Promise.resolve();
   closeServer
@@ -43,6 +45,17 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('unhandledRejection', (err) => log.error({ err }, 'unhandled promise rejection'));
 
 ctx.settings.load().finally(() => {
+  // Library files from the database; runs cut off by the last stop are marked failed and the
+  // queue continues.
+  ctx.strategies.syncFiles();
+  if (config.bots.worker) {
+    ctx.backtests
+      .recover()
+      .then(() => ctx.backtests.drain())
+      .catch((e) => log.warn({ error: e.message }, 'backtest queue not started'));
+    // Also picks up runs queued by another suite process (a dev instance without a worker).
+    backtestQueue = startInterval('backtest queue', 60 * 1000, () => ctx.backtests.recover().then(() => ctx.backtests.drain()), log);
+  }
   if (config.jobs) {
     ctx.tickerRefresh.schedule(3000);
     haltGuard = startHaltGuard(ctx);

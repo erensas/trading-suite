@@ -1,11 +1,14 @@
 // Trading control plane: kill switch and real engine modes (db/migrations/001).
-// Each engine reads the switch on its own; this service writes it, pauses Freqtrade, and
-// reports engine modes from Freqtrade's API and the engine_status heartbeat table.
+// Each engine reads the switch on its own; this service writes it, pauses every Freqtrade bot
+// (src/services/bots.js: the main bot and the managed bots), and reports engine modes from
+// Freqtrade's API and the engine_status heartbeat table.
 const { UNDEFINED_TABLE, withTransaction } = require('../db');
 
 const ENGINE_STALE_SECONDS = 180;
 
-function createControl({ db, freqtrade }) {
+// ctx.bots is read when needed (the bots service also reads the kill switch from here).
+function createControl(ctx) {
+  const { db, freqtrade } = ctx;
   async function state() {
     try {
       const r = await db.query('SELECT halted, reason, changed_by, changed_at FROM trading_control WHERE id = 1');
@@ -64,11 +67,15 @@ function createControl({ db, freqtrade }) {
   async function halt(reason, actor) {
     await write(true, reason, actor);
     const results = { database: 'halted' };
-    try {
-      await freqtrade.api('POST', '/pause');
-      results.freqtrade = 'paused (open trades managed, no new entries)';
-    } catch (e) {
-      results.freqtrade = `pause failed: ${e.message}; entries stay blocked by confirm_trade_entry`;
+    if (ctx.bots) {
+      Object.assign(results, botResults(await ctx.bots.pauseAll(reason)));
+    } else {
+      try {
+        await freqtrade.api('POST', '/pause');
+        results.freqtrade = 'paused (open trades managed, no new entries)';
+      } catch (e) {
+        results.freqtrade = `pause failed: ${e.message}; entries stay blocked by confirm_trade_entry`;
+      }
     }
     results['web3-dex-bot'] = 'reads trading_control; scanner stops transmitting';
     return results;
@@ -77,6 +84,10 @@ function createControl({ db, freqtrade }) {
   async function resume(actor) {
     await write(false, 'Resumed from trading-suite UI', actor);
     const results = { database: 'resumed' };
+    if (ctx.bots) {
+      Object.assign(results, botResults(await ctx.bots.startAll(actor)));
+      return results;
+    }
     try {
       await freqtrade.api('POST', '/start');
       results.freqtrade = 'running';
@@ -85,6 +96,9 @@ function createControl({ db, freqtrade }) {
     }
     return results;
   }
+
+  // The main bot keeps its old key ("freqtrade") in the results; managed bots are "bot <name>".
+  const botResults = (byName) => Object.fromEntries(Object.entries(byName).map(([name, r]) => [name === 'main' ? 'freqtrade' : `bot ${name}`, r]));
 
   return { state, freqtradeEngine, heartbeatEngines, halt, resume };
 }

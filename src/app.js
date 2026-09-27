@@ -32,6 +32,7 @@ function createApp(ctx) {
   app.use(require('./routes/providers')(ctx));
   app.use(require('./routes/market')(ctx));
   app.use(require('./routes/instruments')(ctx));
+  app.use(require('./routes/charts')(ctx));
   app.use(require('./routes/reports')(ctx));
   app.use(require('./routes/integrations')(ctx));
   app.use(require('./routes/control')(ctx));

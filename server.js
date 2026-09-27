@@ -3,12 +3,14 @@
 const { createContext } = require('./src/context');
 const { createApp } = require('./src/app');
 const { startHaltGuard } = require('./src/jobs/halt-guard');
+const { startInterval } = require('./src/jobs/interval');
 
 const ctx = createContext();
 const { config, log, db } = ctx;
 const app = createApp(ctx);
 let server = null;
 let haltGuard = null;
+let indicatorAlerts = null;
 
 // SIGTERM (systemctl stop/restart, deploy): stop taking requests, close log streams and
 // jobs, let running requests finish, close the DB pool. Forced exit after 10 s.
@@ -22,6 +24,7 @@ function shutdown(signal) {
   }, 10000).unref();
   ctx.tickerRefresh.stop();
   if (haltGuard) haltGuard.stop();
+  if (indicatorAlerts) indicatorAlerts.stop();
   for (const res of ctx.logStreams) res.end();
   const closeServer = server ? new Promise((resolve) => server.close(resolve)) : Promise.resolve();
   closeServer
@@ -43,6 +46,8 @@ ctx.settings.load().finally(() => {
   if (config.jobs) {
     ctx.tickerRefresh.schedule(3000);
     haltGuard = startHaltGuard(ctx);
+    // Indicator alerts need candles, so they are checked every 5 minutes, not on each refresh.
+    indicatorAlerts = startInterval('indicator alerts', 5 * 60 * 1000, () => ctx.alerts.evaluateIndicators(), log);
   }
   server = app.listen(config.port, config.host, (err) => {
     if (err) {

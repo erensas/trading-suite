@@ -184,6 +184,53 @@ const order = z.object({
     .default('MARKET'),
 });
 
+// ---- chart layouts and alerts -----------------------------------------------------------------
+const Indicators = require('../public/indicators');
+const INDICATOR_IDS = Object.keys(Indicators.DEFS);
+const HEX = /^#[0-9a-fA-F]{6}$/;
+const indicatorRef = z.object({
+  id: z.enum(INDICATOR_IDS, { error: `indicator must be one of ${INDICATOR_IDS.join(', ')}` }),
+  params: z.record(z.string(), z.union([z.number(), z.string()])).default({}),
+});
+const chartLayout = z.object({
+  scope: z.string().trim().min(1).max(60).default('default'),
+  layout: z.object({
+    indicators: z
+      .array(
+        indicatorRef.extend({
+          uid: z.string().regex(/^[a-z0-9]{1,20}$/i),
+          colors: z.record(z.string(), z.string().regex(HEX, 'colors must be #rrggbb')).default({}),
+          visible: z.boolean().default(true),
+        })
+      )
+      .max(20, 'at most 20 indicators per chart'),
+    showVolume: z.boolean().default(true),
+  }),
+});
+const ALERT_KINDS = ['price_above', 'price_below', 'change_above', 'change_below', 'indicator_above', 'indicator_below'];
+const alert = z
+  .object({
+    symbol: z.string().trim().min(1).max(60),
+    kind: z.enum(ALERT_KINDS, { error: `kind must be one of ${ALERT_KINDS.join(', ')}` }),
+    value: z.coerce.number({ error: 'value must be a number' }).refine(Number.isFinite, 'value must be a number'),
+    indicator: indicatorRef.extend({ output: z.string().max(20).optional() }).nullish(),
+    timeframe: z.enum(TIMEFRAMES).nullish(),
+    note: optionalText(200),
+    repeat: boolish.default(false),
+    enabled: boolish.default(true),
+  })
+  .superRefine((a, ctx) => {
+    if (a.kind.startsWith('indicator_')) {
+      if (!a.indicator) ctx.addIssue({ code: 'custom', path: ['indicator'], message: 'indicator alerts need an indicator' });
+      if (!a.timeframe) ctx.addIssue({ code: 'custom', path: ['timeframe'], message: 'indicator alerts need a timeframe' });
+      if (a.indicator && a.indicator.output && !Indicators.DEFS[a.indicator.id].outputs.some((o) => o.key === a.indicator.output)) {
+        ctx.addIssue({ code: 'custom', path: ['indicator', 'output'], message: `output must be one of ${Indicators.DEFS[a.indicator.id].outputs.map((o) => o.key).join(', ')}` });
+      }
+    }
+  });
+const alertEventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(200).default(50) });
+const alertsSeen = z.object({ ids: z.array(z.coerce.number().int().positive()).max(500).optional(), all: z.boolean().optional() });
+
 // ---- control plane -------------------------------------------------------------------------
 const halt = z.object({ reason: z.string().trim().max(200).optional() });
 const resume = z.object({ confirm: z.literal('RESUME', { error: 'Type RESUME to confirm' }) });
@@ -217,4 +264,9 @@ module.exports = {
   halt,
   resume,
   serviceParams,
+  chartLayout,
+  ALERT_KINDS,
+  alert,
+  alertEventsQuery,
+  alertsSeen,
 };

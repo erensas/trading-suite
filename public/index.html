@@ -63,9 +63,8 @@
           <div class="price-now"><span id="active-price">-</span> <span id="active-change" class="change">-</span></div>
           <div class="tf-btn-group" id="tf-group" role="group" aria-label="Timeframe"></div>
           <div class="tf-btn-group">
-            <button type="button" class="tf-btn" data-indicator="sma20" aria-pressed="false">SMA 20</button>
-            <button type="button" class="tf-btn" data-indicator="sma50" aria-pressed="false">SMA 50</button>
-            <button type="button" class="tf-btn" data-indicator="ema200" aria-pressed="false">EMA 200</button>
+            <button type="button" class="tf-btn" id="btn-studies" title="Indicators (I)" aria-haspopup="dialog"><i class="fa-solid fa-wave-square" aria-hidden="true"></i> Indicators <span class="count-badge" id="studies-count"></span></button>
+            <button type="button" class="tf-btn" id="btn-alerts" title="Alerts" aria-haspopup="dialog"><i class="fa-solid fa-bell" aria-hidden="true"></i> Alerts <span class="count-badge alert-badge hidden" id="alerts-badge"></span></button>
             <button type="button" class="tf-btn" id="btn-markers" title="Trade markers and open-trade lines" aria-pressed="true"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Trades</button>
             <button type="button" class="tf-btn" id="btn-watchlist" title="Show or hide the pair list" aria-label="Pair list" aria-pressed="true"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>
           </div>
@@ -395,6 +394,65 @@
     </div>
   </div>
 
+  <!-- Indicators on the chart -->
+  <div id="studies-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="studies-title">
+    <div class="modal-card studies-card">
+      <div class="modal-head-row"><div id="studies-title" class="modal-title">Indicators</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="studies-layout">
+        <div class="studies-library">
+          <input type="search" id="studies-search" placeholder="Find an indicator…" aria-label="Find an indicator" autocomplete="off">
+          <div id="studies-library" class="studies-list"></div>
+        </div>
+        <div class="studies-active">
+          <div class="card-title small">On the chart</div>
+          <div id="studies-active" class="studies-list"></div>
+        </div>
+      </div>
+      <div class="studies-foot">
+        <label class="check small"><input type="checkbox" id="studies-own"> Only for <span id="studies-symbol">this symbol</span> (otherwise every chart)</label>
+        <label class="check small"><input type="checkbox" id="studies-volume"> Volume</label>
+        <span class="muted small" id="studies-saved"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  <div id="alerts-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="alerts-title">
+    <div class="modal-card wide alerts-card">
+      <div class="modal-head-row"><div id="alerts-title" class="modal-title">Alerts</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <form id="alert-form" class="alert-form">
+        <select name="kind" aria-label="Condition">
+          <option value="price_above">Price above</option>
+          <option value="price_below">Price below</option>
+          <option value="change_above">24h change above (%)</option>
+          <option value="change_below">24h change below (%)</option>
+          <option value="indicator_above">Indicator above</option>
+          <option value="indicator_below">Indicator below</option>
+        </select>
+        <span class="alert-ind hidden">
+          <select name="indicator" aria-label="Indicator"></select>
+          <input name="len" type="number" min="1" max="500" aria-label="Length" title="Length">
+          <select name="output" aria-label="Line"></select>
+          <select name="timeframe" aria-label="Timeframe"></select>
+        </span>
+        <input name="value" type="number" step="any" required aria-label="Level" placeholder="Level">
+        <input name="note" maxlength="200" placeholder="Note (optional)" aria-label="Note">
+        <label class="check small"><input type="checkbox" name="repeat"> Repeat</label>
+        <button type="submit" class="btn-buy"><i class="fa-solid fa-bell" aria-hidden="true"></i> Add alert</button>
+      </form>
+      <div class="hint">Price and 24 h change alerts are checked on every price refresh; indicator alerts every 5 minutes on the last closed candle. A one-off alert switches itself off when it fires; a repeating one fires again after the condition was false once.</div>
+      <div class="toolbar-row"><label class="check small"><input type="checkbox" id="alerts-all"> All symbols</label></div>
+      <div class="table-container alerts-table">
+        <table>
+          <thead><tr><th>Alert</th><th>Status</th><th class="r">Last value</th><th>Last fired</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="alerts-tbody"></tbody>
+        </table>
+      </div>
+      <div class="card-title small">Recent</div>
+      <div id="alert-events" class="alert-events"></div>
+    </div>
+  </div>
+
   <!-- Manage watchlists -->
   <div id="lists-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="lists-title">
     <div class="modal-card wide">
@@ -410,8 +468,10 @@
   <div id="toast-container" role="status" aria-live="polite"></div>
 
   <script src="shell.js"></script>
+  <script src="indicators.js"></script>
   <script src="app.js"></script>
   <script src="watchlists.js"></script>
+  <script src="studies.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

@@ -300,3 +300,76 @@ test('phase A: several sources per instrument, fallback, order, import, watchlis
   const { createInstruments } = require('../../src/services/instruments');
   assert.equal(await createInstruments({ db }).backfillListings(), 1);
 });
+
+test('phase B: chart layouts and price / indicator alerts', { skip }, async (t) => {
+  await resetSchema();
+  await withClient((c) => migrate.up(c, migrate.readMigrations(), quiet));
+  const log = createLogger('silent');
+  const db = createPool({ connectionString: URL_, max: 4, statementTimeoutMs: 3000 }, log);
+  // 60 hourly candles rising 1 per bar: RSI 100 on the last closed bar.
+  const rising = Array.from({ length: 60 }, (_, i) => ({ time: 1790000000 + i * 3600, open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 5 }));
+  const guard = tableGuard({ 'Binance Spot': { candles: rising } });
+  guard.method = 'candles';
+  const app = await startApp({ db, guard, freqtrade: fakeFreqtrade({}) });
+  t.after(async () => {
+    await app.close();
+    await db.end();
+  });
+  await db.query("INSERT INTO instrument_registry (symbol, category, last_price, change_24h_pct) VALUES ('BTC/USDT', 'CEX', 100, 1.5)");
+  const binance = (await db.query("SELECT id FROM market_providers WHERE name = 'Binance Spot'")).rows[0].id;
+  await db.query('INSERT INTO instrument_listings (symbol, provider_id, priority) VALUES ($1, $2, 0)', ['BTC/USDT', binance]);
+
+  // Layouts: the default applies until a symbol has its own.
+  const layout = { indicators: [{ uid: 'a1', id: 'rsi', params: { length: 14 }, colors: { rsi: '#ff0000' }, visible: true }], showVolume: false };
+  assert.equal((await app.request('PUT', '/api/chart-layout', { control: true, body: { scope: 'default', layout } })).status, 200);
+  let got = (await app.request('GET', '/api/chart-layout?symbol=BTC%2FUSDT')).json;
+  assert.equal(got.scope, 'default');
+  assert.equal(got.layout.indicators[0].id, 'rsi');
+  await app.request('PUT', '/api/chart-layout', { control: true, body: { scope: 'BTC/USDT', layout: { indicators: [], showVolume: true } } });
+  got = (await app.request('GET', '/api/chart-layout?symbol=BTC%2FUSDT')).json;
+  assert.equal(got.scope, 'BTC/USDT');
+  assert.equal(got.hasOwn, true);
+  const bad = await app.request('PUT', '/api/chart-layout', { control: true, body: { layout: { indicators: [{ uid: 'x', id: 'nope' }] } } });
+  assert.equal(bad.status, 400);
+
+  // One-shot price alert: fires once, then is disabled.
+  const a1 = await app.request('POST', '/api/alerts', { control: true, body: { symbol: 'BTC/USDT', kind: 'price_above', value: 110, note: 'breakout' } });
+  assert.equal(a1.status, 200, JSON.stringify(a1.json));
+  assert.match(a1.json.alert.text, /BTC\/USDT price above 110/);
+  // Repeating 24h-change alert.
+  const a2 = await app.request('POST', '/api/alerts', { control: true, body: { symbol: 'BTC/USDT', kind: 'change_below', value: -5, repeat: true } });
+  assert.equal(a2.status, 200);
+  const needsInd = await app.request('POST', '/api/alerts', { control: true, body: { symbol: 'BTC/USDT', kind: 'indicator_above', value: 70 } });
+  assert.equal(needsInd.status, 400);
+  const a3 = await app.request('POST', '/api/alerts', { control: true, body: { symbol: 'BTC/USDT', kind: 'indicator_above', value: 70, timeframe: '1h', indicator: { id: 'rsi', params: { length: 14 } } } });
+  assert.equal(a3.status, 200, JSON.stringify(a3.json));
+
+  const alerts = app.ctx.alerts;
+  assert.equal(await alerts.evaluatePrices(), 0);
+  await db.query("UPDATE instrument_registry SET last_price = 111, change_24h_pct = -6 WHERE symbol = 'BTC/USDT'");
+  assert.equal(await alerts.evaluatePrices(), 2);
+  assert.equal(await alerts.evaluatePrices(), 0, 'nothing fires twice while the condition holds');
+  await db.query("UPDATE instrument_registry SET change_24h_pct = 0 WHERE symbol = 'BTC/USDT'");
+  await alerts.evaluatePrices(); // re-arms the repeating alert
+  await db.query("UPDATE instrument_registry SET change_24h_pct = -7 WHERE symbol = 'BTC/USDT'");
+  assert.equal(await alerts.evaluatePrices(), 1, 'the repeating alert fires again after re-arming');
+  const oneShot = (await db.query('SELECT enabled, triggered_at FROM alerts WHERE id = $1', [a1.json.alert.id])).rows[0];
+  assert.equal(oneShot.enabled, false);
+  assert.ok(oneShot.triggered_at);
+
+  // Indicator alert on the last closed candle.
+  assert.equal(await alerts.evaluateIndicators(), 1);
+  const ev = (await app.request('GET', '/api/alert-events')).json;
+  assert.equal(ev.events.length, 4);
+  assert.equal(ev.unseen, 4);
+  assert.match(ev.events[0].message, /RSI 14 \(1h\) above 70/);
+  await app.request('POST', '/api/alert-events/seen', { control: true, body: { all: true } });
+  assert.equal((await app.request('GET', '/api/alert-events')).json.unseen, 0);
+
+  // Editing re-arms and re-enables.
+  const upd = await app.request('PUT', `/api/alerts/${a1.json.alert.id}`, { control: true, body: { enabled: true, value: 120 } });
+  assert.equal(upd.json.alert.armed, true);
+  assert.equal(Number(upd.json.alert.value), 120);
+  assert.equal((await app.request('DELETE', `/api/alerts/${a2.json.alert.id}`, { control: true })).status, 200);
+  assert.equal((await app.request('GET', '/api/alerts?symbol=BTC%2FUSDT')).json.alerts.length, 2);
+});

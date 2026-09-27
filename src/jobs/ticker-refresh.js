@@ -12,6 +12,7 @@ function createTickerRefresh({ db, providers, instruments, settings, log }) {
   let timer = null;
   let stopped = false;
   let lastGeckoRefresh = 0;
+  const hooks = [];
 
   const clampPct = (v) => (Number.isFinite(v) ? Math.max(-999999, Math.min(999999, v)) : null);
   const clampVol = (v) => (Number.isFinite(v) ? Math.min(v, 9.9e15) : null);
@@ -96,6 +97,7 @@ function createTickerRefresh({ db, providers, instruments, settings, log }) {
       log.debug({ updated, failed, ms: Date.now() - started }, 'ticker refresh');
       if (failed || errors._) log.info({ updated, failed, errors }, 'ticker refresh had failures');
     }
+    for (const fn of hooks) await fn(state);
   }
 
   // Next run after delayMs (default: the configured interval), then every interval.
@@ -116,7 +118,7 @@ function createTickerRefresh({ db, providers, instruments, settings, log }) {
     clearTimeout(timer);
   }
 
-  return { state, run, schedule, stop };
+  return { state, run, schedule, stop, afterRun: (fn) => hooks.push(fn) };
 }
 
 module.exports = { createTickerRefresh };

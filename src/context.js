@@ -12,6 +12,7 @@ const { createProviders } = require('./services/providers');
 const { createInstruments } = require('./services/instruments');
 const { createWatchlists } = require('./services/watchlists');
 const { createSearch } = require('./services/search');
+const { createAlerts } = require('./services/alerts');
 const { createMarketData } = require('./services/market-data');
 const { createControl } = require('./services/control');
 const { createReports } = require('./services/reports');
@@ -48,9 +49,12 @@ function createContext(overrides = {}) {
   make('marketData', () => createMarketData(ctx));
   make('watchlists', () => createWatchlists(ctx));
   make('search', () => createSearch(ctx));
+  make('alerts', () => createAlerts(ctx));
   make('control', () => createControl(ctx));
   make('reports', () => createReports(ctx));
   make('tickerRefresh', () => createTickerRefresh(ctx));
+  // Price alerts are checked against the prices each refresh has just written.
+  ctx.tickerRefresh.afterRun(() => ctx.alerts.evaluatePrices().catch((e) => ctx.log.warn({ error: e.message }, 'price alert check failed')));
   make('requireControl', () => requireControl(ctx.identity));
 
   // Side effects of a settings change: the web3 scanner reads its profit guard from

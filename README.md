@@ -22,10 +22,16 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 - **Search (Ctrl+K or `/`)**: one box for registered instruments, provider catalogues and commands (go to a view or settings pane). Provider search covers Binance spot and USD-M futures, OKX, Bybit and Yahoo Finance (stocks, ETFs, indices); "DEX pools" asks GeckoTerminal (a few searches a minute), as does a contract address. Results are merged by symbol, with a badge per provider that carries it (✓ already a source). **Add** registers the instrument with every offered source and puts it on the chosen list; a badge adds that source only. Futures use the ccxt form `BASE/QUOTE:SETTLE` (e.g. `BTC/USDT:USDT`), so they never mix with spot.
 - **Several sources per instrument** (`instrument_listings`): the chart and prices use the first enabled source in priority order that answers, and the source note shows ⚠ when it had to fall back. The plug button next to the chart opens the Sources dialog: reorder, enable or disable, edit the provider symbol, test each source, find the same pair on other providers, add one by hand. The source menu beside it pins the chart to one source. The first source is mirrored into `instrument_registry.provider_id` for the scripts that still read it; registry rows those scripts add get their source row on the next price refresh.
 
+### Charts, indicators and alerts
+
+- Charts use TradingView Lightweight Charts 5. **Indicators** (button or `I`): 21 studies in `public/indicators.js`: SMA, EMA, WMA, HMA, VWAP (daily reset), Bollinger Bands, Keltner, Donchian, Supertrend, Parabolic SAR, RSI, MACD, Stochastic, Stochastic RSI, CCI, Williams %R, ROC, ADX (+DI/−DI), ATR, OBV, MFI. They follow Pine's definitions (EMA seeded with an SMA, Wilder smoothing for RSI/ATR/ADX, population standard deviation), so values match TradingView. Overlays share the price pane; every oscillator gets its own resizable pane with its reference levels. Each indicator has its parameters, colours and a show/hide switch, and the legend shows the values under the cursor.
+- **Layouts** (`chart_layouts`): the indicator set is saved on the server. The default layout applies to every chart; "Only for this symbol" keeps a separate one for the current symbol, and unticking it goes back to the default. Volume on/off is part of the layout.
+- **Alerts** (bell button): price above/below, 24 h change above/below, or an indicator line above/below a level on a timeframe. Price and change alerts are checked after every price refresh, indicator alerts every 5 minutes on the last closed candle. One-off alerts switch off when they fire; repeating ones fire again after the condition was false once. Price alerts show as dotted lines on the chart. Fired alerts pop up as notifications and count on the bell until the alerts dialog is opened.
+
 ### Links and keyboard
 
 - The address bar holds the view: `#markets/<pair>/<timeframe>` (pair URL-encoded, e.g. `#markets/BTC%2FUSDT/1h`), `#screener`, `#freqtrade`, `#dex`, `#settings/<general|providers|instruments|integrations>`, `#logs`; the shell adds `#system` and `#frequi`. Back and Forward move between views and pairs.
-- Ctrl+K or `/` opens search; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
+- Ctrl+K or `/` opens search, `I` the indicators; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
 - Every panel shows how old its data is; the label turns amber when an update failed or the data is older than expected, and failed panels have a Retry button.
 - Prices below 0.001 use subscript zeros (`0.0₅436` = 0.00000436); changes carry ▲ / ▼ as well as colour.
 - The chart legend shows OHLCV for the bar under the cursor. With "Trades" on, open Freqtrade trades on the pair are drawn as entry, stop-loss and liquidation lines.
@@ -92,6 +98,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `003_market_providers.sql`: `market_providers`, provider columns on `instrument_registry`, `suite_settings`, default providers and routing.
 - `004_suite_audit_log.sql`: audit log of UI changes.
 - `005_listings_watchlists.sql`: `instrument_listings` (several sources per instrument, copied from the old single provider), `watchlists` and `watchlist_items` with starter lists.
+- `006_chart_layouts_alerts.sql`: `chart_layouts`, `alerts`, `alert_events`.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 

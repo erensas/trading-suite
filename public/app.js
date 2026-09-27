@@ -14,7 +14,6 @@ const TS = {
   activeTf: '15m',
   candles: [],
   markers: [],
-  indicators: { sma20: false, sma50: false, ema200: false },
   showMarkers: true,
   activeTab: 'chart',
   candleRequest: 0,
@@ -177,39 +176,46 @@ function showToast(title, message, type = 'info') {
 }
 window.showToast = showToast;
 
-// ---- chart ---------------------------------------------------------------------
+// ---- chart (Lightweight Charts 5: panes for oscillators, markers as a plugin) -----------
+const LC = LightweightCharts;
 let chart = null;
 let candleSeries = null;
 let volumeSeries = null;
-const indicatorSeries = {};
-const INDICATOR_STYLE = { sma20: ['#38bdf8', 20, 'sma'], sma50: ['#f59e0b', 50, 'sma'], ema200: ['#a855f7', 200, 'ema'] };
+let markersApi = null;
 
 function initChart() {
   const el = $('chart-wrapper');
-  chart = LightweightCharts.createChart(el, {
+  chart = LC.createChart(el, {
     width: el.clientWidth,
     height: el.clientHeight,
-    layout: { background: { type: 'solid', color: '#020617' }, textColor: '#94a3b8', fontSize: 11, fontFamily: "'JetBrains Mono Variable', ui-monospace, monospace" },
+    layout: {
+      background: { type: 'solid', color: '#020617' }, textColor: '#94a3b8', fontSize: 11, fontFamily: "'JetBrains Mono Variable', ui-monospace, monospace",
+      panes: { separatorColor: '#1e293b', separatorHoverColor: 'rgba(56, 189, 248, 0.25)', enableResize: true },
+    },
     grid: { vertLines: { color: '#111c33' }, horzLines: { color: '#111c33' } },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    crosshair: { mode: LC.CrosshairMode.Normal },
     localization: { priceFormatter: fmtPrice },
     rightPriceScale: { borderColor: '#1e293b' },
     timeScale: { borderColor: '#1e293b', timeVisible: true, secondsVisible: false },
   });
-  candleSeries = chart.addCandlestickSeries({
+  candleSeries = chart.addSeries(LC.CandlestickSeries, {
     upColor: '#10b981', downColor: '#f43f5e', borderUpColor: '#10b981', borderDownColor: '#f43f5e', wickUpColor: '#10b981', wickDownColor: '#f43f5e',
   });
-  volumeSeries = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
+  volumeSeries = chart.addSeries(LC.HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  markersApi = LC.createSeriesMarkers(candleSeries, []);
   new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })).observe(el);
   chart.subscribeCrosshairMove((param) => {
     const bar = param && param.time ? param.seriesData.get(candleSeries) : null;
-    renderLegend(bar);
+    renderLegend(bar, param);
   });
+  TS.chart = chart;
+  TS.candleSeries = candleSeries;
+  TS.volumeSeries = volumeSeries;
 }
 
-// OHLCV legend: the bar under the crosshair, or the last bar.
-function renderLegend(bar) {
+// OHLCV legend: the bar under the crosshair, or the last bar; indicator values below it.
+function renderLegend(bar, param) {
   const box = $('chart-legend');
   if (!box) return;
   const c = bar || TS.candles[TS.candles.length - 1];
@@ -224,7 +230,8 @@ function renderLegend(bar) {
     <span>O <b class="${cls}">${fmtPrice(full.open)}</b></span><span>H <b class="${cls}">${fmtPrice(full.high)}</b></span>
     <span>L <b class="${cls}">${fmtPrice(full.low)}</b></span><span>C <b class="${cls}">${fmtPrice(full.close)}</b></span>
     ${chg === null ? '' : `<span class="${cls}">${fmtPct(chg)}</span>`}
-    ${full.volume ? `<span>V <b>${fmtCompact(full.volume)}</b></span>` : ''}`;
+    ${full.volume ? `<span>V <b>${fmtCompact(full.volume)}</b></span>` : ''}
+    ${TS.studies ? TS.studies.legend(param) : ''}`;
 }
 
 // Entry, stop-loss and liquidation lines of open Freqtrade trades on the active pair.
@@ -243,7 +250,7 @@ async function loadTradeLines() {
   if (symbol !== TS.activeSymbol || !candleSeries) return;
   tradeLines.forEach((l) => candleSeries.removePriceLine(l));
   tradeLines = [];
-  const dashed = LightweightCharts.LineStyle.Dashed;
+  const dashed = LC.LineStyle.Dashed;
   for (const t of trades) {
     const side = t.is_short ? 'short' : 'long';
     const add = (price, color, title) => {
@@ -312,12 +319,12 @@ async function loadCandles({ incremental = false } = {}) {
     } else {
       candleSeries.applyOptions({ priceFormat: priceFormatFor(candles) });
       candleSeries.setData(candles);
-      volumeSeries.setData(TS.settings.showVolume === false ? [] : volumeData(candles));
+      volumeSeries.setData(showVolume() ? volumeData(candles) : []);
       chart.timeScale().fitContent();
       chart.timeScale().scrollToRealTime();
     }
     chartMessage(null);
-    renderIndicators();
+    if (TS.studies) TS.studies.update();
     applyMarkers();
     updateLivePrice(candles);
     renderLegend(null);
@@ -349,37 +356,12 @@ function updateLivePrice(candles) {
   }
 }
 
-function sma(c, n) {
-  const out = [];
-  let sum = 0;
-  for (let i = 0; i < c.length; i++) {
-    sum += c[i].close;
-    if (i >= n) sum -= c[i - n].close;
-    if (i >= n - 1) out.push({ time: c[i].time, value: sum / n });
-  }
-  return out;
+// Volume: the chart layout decides (studies.js); the global setting is the fallback.
+function showVolume() {
+  if (TS.layout && typeof TS.layout.showVolume === 'boolean') return TS.layout.showVolume;
+  return TS.settings.showVolume !== false;
 }
-function ema(c, n) {
-  const out = [];
-  const k = 2 / (n + 1);
-  let e = null;
-  c.forEach((x, i) => {
-    e = e === null ? x.close : x.close * k + e * (1 - k);
-    if (i >= n - 1) out.push({ time: x.time, value: e });
-  });
-  return out;
-}
-function renderIndicators() {
-  for (const [key, [color, n, type]] of Object.entries(INDICATOR_STYLE)) {
-    if (TS.indicators[key]) {
-      if (!indicatorSeries[key]) indicatorSeries[key] = chart.addLineSeries({ color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-      indicatorSeries[key].setData(type === 'sma' ? sma(TS.candles, n) : ema(TS.candles, n));
-    } else if (indicatorSeries[key]) {
-      chart.removeSeries(indicatorSeries[key]);
-      delete indicatorSeries[key];
-    }
-  }
-}
+TS.refreshVolume = () => volumeSeries && volumeSeries.setData(showVolume() ? volumeData(TS.candles) : []);
 
 async function loadMarkers() {
   if (!TS.activeSymbol) return;
@@ -396,8 +378,8 @@ async function loadMarkers() {
 // Markers must sit on an existing bar: snap each to the bar that contains it and drop
 // the ones outside the loaded range.
 function applyMarkers() {
-  if (!candleSeries) return;
-  if (!TS.showMarkers || !TS.candles.length) return candleSeries.setMarkers([]);
+  if (!markersApi) return;
+  if (!TS.showMarkers || !TS.candles.length) return markersApi.setMarkers([]);
   const times = TS.candles.map((c) => c.time);
   const first = times[0];
   const lastEnd = times[times.length - 1] + TF_SECONDS[TS.activeTf];
@@ -414,7 +396,7 @@ function applyMarkers() {
     snapped.push({ time: times[lo], position: m.position, color: m.color, shape: m.shape, text: m.text });
   }
   snapped.sort((a, b) => a.time - b.time);
-  candleSeries.setMarkers(snapped);
+  markersApi.setMarkers(snapped);
 }
 
 // ---- pairs ---------------------------------------------------------------------------
@@ -882,6 +864,7 @@ function showTab(tab) {
 }
 TS.showTab = showTab;
 TS.reloadCandles = () => loadCandles();
+TS.renderLegend = () => renderLegend(null);
 TS.openSettings = (pane) => {
   if (TS.setSettingsPane) TS.setSettingsPane(pane);
   showTab('settings');
@@ -914,16 +897,6 @@ function bindEvents() {
     const b = e.target.closest('[data-tf]');
     if (b) setTimeframe(b.dataset.tf);
   });
-  document.querySelectorAll('[data-indicator]').forEach((b) =>
-    b.addEventListener('click', () => {
-      const key = b.dataset.indicator;
-      TS.indicators[key] = !TS.indicators[key];
-      b.classList.toggle('active', TS.indicators[key]);
-      b.setAttribute('aria-pressed', String(TS.indicators[key]));
-      storage.set('indicators', TS.indicators);
-      renderIndicators();
-    })
-  );
   $('btn-markers').addEventListener('click', () => {
     TS.showMarkers = !TS.showMarkers;
     $('btn-markers').classList.toggle('active', TS.showMarkers);
@@ -989,11 +962,6 @@ async function init() {
   TS.showMarkers = TS.settings.showTradeMarkers !== false;
   $('btn-markers').classList.toggle('active', TS.showMarkers);
   $('btn-markers').setAttribute('aria-pressed', String(TS.showMarkers));
-  Object.assign(TS.indicators, storage.get('indicators', {}));
-  document.querySelectorAll('[data-indicator]').forEach((b) => {
-    b.classList.toggle('active', !!TS.indicators[b.dataset.indicator]);
-    b.setAttribute('aria-pressed', String(!!TS.indicators[b.dataset.indicator]));
-  });
   TS.sourceChoice = storage.get('sources', {}) || {};
   setWatchlistVisible(storage.get('watchlist', true));
 

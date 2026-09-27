@@ -120,10 +120,15 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
     return symbol;
   }
 
+  // A source without a provider symbol lets the adapter derive the market from base and
+  // quote, so for an exchange provider it is the same market as the explicit one.
+  const sameSource = (l, p, providerSymbol) =>
+    l.provider_id === p.id && ((l.provider_symbol || '') === (providerSymbol || '') || (p.kind !== 'geckoterminal' && !l.provider_symbol));
+
   async function ensureSource(phase, symbol, p, providerSymbol, network) {
     const e = entry(symbol);
     if (!e || !p) return false;
-    if (e.listings.some((l) => l.provider_id === p.id && (l.provider_symbol || '') === (providerSymbol || ''))) return false;
+    if (e.listings.some((l) => sameSource(l, p, providerSymbol))) return false;
     say(phase, `+ source ${e.inst.symbol} <- ${p.name}${providerSymbol ? ` ${providerSymbol}` : ''}${network ? ` (${network})` : ''}`);
     counts.sources += 1;
     let row = { id: null, provider_id: p.id, provider_symbol: providerSymbol || null, network: network || null, priority: e.listings.length, enabled: true };
@@ -357,9 +362,23 @@ function createPopulator(ctx, { dryRun = false, log = console.log } = {}) {
     for (const [k, v] of errors) notes.push(`D: ${k}: ${v}`);
   }
 
-  // ---- E: registry rows of DEX instruments -----------------------------------------------------
+  // ---- E: registry rows of DEX instruments, duplicate exchange sources ------------------------
   async function phaseE() {
     if (!dryRun) await load();
+    // An exchange source without a provider symbol next to an explicit one of the same
+    // provider is the same market twice; the explicit one stays.
+    for (const e of state.registry.values()) {
+      for (const l of [...e.listings]) {
+        const p = state.providers.find((x) => x.id === l.provider_id);
+        if (!p || p.kind === 'geckoterminal' || l.provider_symbol) continue;
+        const explicit = e.listings.find((x) => x !== l && x.provider_id === l.provider_id && x.provider_symbol);
+        if (!explicit) continue;
+        say('E', `- source ${e.inst.symbol} <- ${p.name} (no provider symbol; ${explicit.provider_symbol} stays)`);
+        counts.fixes += 1;
+        if (!dryRun && l.id != null) await ctx.instruments.removeListing(l.id);
+        e.listings = e.listings.filter((x) => x !== l);
+      }
+    }
     for (const e of state.registry.values()) {
       if (e.inst.category !== 'DEX' || e.inst.network || !e.listings.length) continue;
       const network = listingNetwork(e.listings[0]);

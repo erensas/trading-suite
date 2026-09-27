@@ -37,7 +37,7 @@ test('pickTokenPool: same network, WETH or stablecoin quote first, then liquidit
 
 // In-memory stand-ins for the services the tool uses.
 function fakeCtx({ registry = [], listings = {}, providers, whitelist, geckoRows = [], candidates = {} } = {}) {
-  const calls = { create: [], addListing: [], addItem: [], reorder: [], update: [], sql: [], search: [] };
+  const calls = { create: [], addListing: [], addItem: [], reorder: [], update: [], sql: [], search: [], remove: [] };
   const rows = new Map(registry.map((r) => [r.symbol, { ...r }]));
   const lst = new Map(Object.entries(listings).map(([s, l]) => [s, l.map((x, i) => ({ id: i + 1, priority: i, enabled: true, ...x }))]));
   let nextId = 100;
@@ -80,6 +80,10 @@ function fakeCtx({ registry = [], listings = {}, providers, whitelist, geckoRows
       },
       update: async (symbol, body) => calls.update.push({ symbol, ...body }),
       backfillListings: async () => 0,
+      removeListing: async (id) => {
+        calls.remove.push(id);
+        for (const [symbol, l] of lst) lst.set(symbol, l.filter((x) => x.id !== id));
+      },
     },
     watchlists: {
       list: async () => wl,
@@ -225,8 +229,14 @@ test('dry run: the plan is printed and nothing is written', async () => {
 test('phase A without the bot and phase E fixes', async () => {
   const quiet = () => {};
   const f = fakeCtx({
-    registry: [{ symbol: 'PEPE/WETH', category: 'DEX', base_asset: 'PEPE', quote_asset: 'WETH', network: null }],
-    listings: { 'PEPE/WETH': [{ provider_id: 5, provider_symbol: 'eth:0xpepe', network: null }] },
+    registry: [
+      { symbol: 'PEPE/WETH', category: 'DEX', base_asset: 'PEPE', quote_asset: 'WETH', network: null },
+      { symbol: 'XRP/USDT', category: 'CEX', base_asset: 'XRP', quote_asset: 'USDT', exchange: 'binance' },
+    ],
+    listings: {
+      'PEPE/WETH': [{ provider_id: 5, provider_symbol: 'eth:0xpepe', network: null }],
+      'XRP/USDT': [{ provider_id: 1, provider_symbol: null, network: null }, { provider_id: 1, provider_symbol: 'XRPUSDT', network: null }],
+    },
     providers: PROVIDERS,
   });
   const pop = createPopulator(f.ctx, { log: quiet });
@@ -236,4 +246,22 @@ test('phase A without the bot and phase E fixes', async () => {
   await pop.phaseE();
   assert.deepEqual(f.calls.update, [{ symbol: 'PEPE/WETH', network: 'eth' }], 'the network comes from the pool source prefix');
   assert.ok(f.calls.sql.some((c) => /route_type = 'DEX'/.test(c.sql)));
+  assert.deepEqual(f.calls.remove, [1], 'the provider-only Binance source goes, the explicit XRPUSDT one stays');
+  assert.deepEqual(f.lst.get('XRP/USDT').map((l) => l.provider_symbol), ['XRPUSDT']);
+});
+
+test('ensureSource: a provider-only exchange source counts as the explicit market, a pool does not', async () => {
+  const quiet = () => {};
+  const f = fakeCtx({
+    registry: [{ symbol: 'BTC/USDT', category: 'CEX', base_asset: 'BTC', quote_asset: 'USDT', exchange: 'binance' }],
+    listings: { 'BTC/USDT': [{ provider_id: 1, provider_symbol: null, network: null }, { provider_id: 5, provider_symbol: null, network: null }] },
+    providers: PROVIDERS,
+    whitelist: ['BTC/USDT'],
+  });
+  const pop = createPopulator(f.ctx, { log: quiet });
+  await pop.load();
+  await pop.phaseA();
+  assert.deepEqual(f.calls.addListing.map((l) => `${l.provider_id}:${l.provider_symbol}`), ['7:BTC/USDT'], 'Binance is already a source (without a symbol); only the bot is added');
+  await pop.phaseB({ networks: {}, tokens: { ethereum: {} }, core_pools: { ethereum: [{ dex: 'uniswap_v3_005', address: '0xP', token0: 'USDT', token1: 'BTC' }] } });
+  assert.ok(f.calls.addListing.some((l) => l.provider_id === 5 && l.provider_symbol === 'eth:0xp'), 'a pinned pool is a new source next to the unpinned GeckoTerminal one');
 });

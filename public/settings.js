@@ -315,9 +315,10 @@
       providers = provs.providers;
       renderInstruments();
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty">${esc(e.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`;
     }
   }
+  TS.reloadInstrumentSettings = () => pane === 'instruments' && loadInstruments();
 
   function renderInstruments() {
     const q = $('instruments-search').value.trim().toLowerCase();
@@ -331,14 +332,13 @@
             <tr>
               <td><strong>${esc(i.symbol)}</strong></td>
               <td>${esc(i.category)}</td>
-              <td>${i.provider_name ? esc(i.provider_name) : '<span class="neg">none</span>'}</td>
-              <td class="mono small">${esc(i.provider_symbol || '-')}</td>
+              <td>${i.provider_name ? `${esc(i.provider_name)}${i.provider_symbol ? ` <span class="mono small muted">${esc(i.provider_symbol)}</span>` : ''}${i.listing_count > 1 ? ` <span class="pill pill-gray">+${i.listing_count - 1} fallback</span>` : ''}` : '<span class="neg">none</span>'}</td>
               <td class="mono small" title="${esc(i.contract_address || '')}">${i.contract_address ? esc(i.contract_address.slice(0, 10)) + '…' : '-'}${i.network ? ` · ${esc(i.network)}` : ''}</td>
               <td>${i.is_active === false ? '<span class="pill pill-gray">inactive</span>' : '<span class="pill pill-green">active</span>'}</td>
-              <td class="r"><button class="icon-btn" data-edit-instrument="${esc(i.symbol)}"><i class="fa-solid fa-pen"></i> Edit</button></td>
+              <td class="r nowrap"><button class="icon-btn" data-sources="${esc(i.symbol)}"><i class="fa-solid fa-plug" aria-hidden="true"></i> Sources</button> <button class="icon-btn" data-edit-instrument="${esc(i.symbol)}"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button></td>
             </tr>`)
           .join('')
-      : '<tr><td colspan="7" class="empty">No instruments match.</td></tr>';
+      : '<tr><td colspan="6" class="empty">No instruments match.</td></tr>';
   }
 
   function providerOptions() {
@@ -351,13 +351,19 @@
       const p = providers.find((x) => String(x.id) === String(pid));
       return p && kinds[p.kind] ? `Format for ${esc(p.name)}: ${esc(kinds[p.kind].symbolHint)}. Leave empty to use BASE+QUOTE.` : 'Leave empty to use BASE+QUOTE.';
     };
+    // A new instrument gets its first source here; existing ones are edited with Sources.
+    const sourceFields = isNew
+      ? [
+          { name: 'provider_id', label: 'First data source', type: 'select', options: providerOptions(), value: '' },
+          { name: 'provider_symbol', label: 'Provider symbol (optional)', value: '', hint: hintFor(null) },
+        ]
+      : [];
     openEditor({
-      title: isNew ? 'Add instrument' : `Edit ${i.symbol}`,
+      title: isNew ? 'Add instrument by hand' : `Edit ${i.symbol}`,
       fields: [
         { name: 'symbol', label: 'Symbol', value: i.symbol || '', placeholder: 'ETH/USDT or SPY', disabled: !isNew },
         { name: 'category', label: 'Category', type: 'select', options: CATEGORIES, value: i.category || 'CEX' },
-        { name: 'provider_id', label: 'Data provider', type: 'select', options: providerOptions(), value: i.provider_id || '' },
-        { name: 'provider_symbol', label: 'Provider symbol (optional)', value: i.provider_symbol || '', hint: hintFor(i.provider_id) },
+        ...sourceFields,
         { name: 'exchange', label: 'Exchange / venue', value: i.exchange || '' },
         { name: 'name', label: 'Display name', value: i.name || '' },
         { name: 'contract_address', label: 'Contract address (DEX)', value: i.contract_address || '', full: true, hint: 'GeckoTerminal finds the most liquid pool for this token; pin one with provider symbol "network:pool_address".' },
@@ -369,7 +375,8 @@
         if (hint) hint.innerHTML = hintFor(v.provider_id);
       },
       onSubmit: async (v) => {
-        const body = { ...v, provider_id: v.provider_id || null };
+        const body = { ...v };
+        if (isNew) body.provider_id = v.provider_id || null;
         if (isNew) {
           await TS.apiSend('POST', 'api/trading/pairs', body);
           showToast('Instrument added', esc(body.symbol.toUpperCase()), 'success');

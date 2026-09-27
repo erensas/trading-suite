@@ -1,5 +1,6 @@
-// Trading view: markets (watchlist + chart + side panel), screener, engine tables, logs.
-// Settings, providers, instruments and integrations live in settings.js.
+// Trading view: markets (chart + side panel), screener, engine tables, logs.
+// Watchlists, search and instrument sources live in watchlists.js; settings, providers,
+// instruments and integrations in settings.js.
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'];
 const TF_SECONDS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
@@ -17,6 +18,9 @@ const TS = {
   showMarkers: true,
   activeTab: 'chart',
   candleRequest: 0,
+  // Chosen data source per symbol (listing id); none = automatic, in priority order.
+  sourceChoice: {},
+  listings: [],
 };
 window.TS = TS;
 
@@ -118,6 +122,7 @@ function ago(v) {
 const changeClass = (v) => (Number(v) > 0 ? 'pos' : Number(v) < 0 ? 'neg' : 'muted');
 const pairBySymbol = (s) => TS.pairs.find((p) => p.symbol === s);
 TS.fmt = { fmtPrice, fmtPct, fmtCompact, fmtUsd, fmtTime, ago };
+TS.util = { storage, changeClass, pairBySymbol, CATEGORY_LABELS, CATEGORY_PILL };
 
 // ---- data freshness -----------------------------------------------------------------
 // Each loader reports success (markFresh) or failure (markError); every [data-age] label
@@ -275,11 +280,14 @@ async function loadCandles({ incremental = false } = {}) {
   const request = ++TS.candleRequest;
   if (!incremental) chartMessage('<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>&nbsp; Loading candles…');
   try {
-    const data = await api(`api/trading/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=${TS.settings.candleLimit || 300}`);
+    const listing = TS.sourceChoice[symbol];
+    const data = await api(`api/trading/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&limit=${TS.settings.candleLimit || 300}${listing ? `&listing=${listing}` : ''}`);
     if (request !== TS.candleRequest) return;
     const candles = data.candles || [];
-    $('chart-source').textContent = `${data.provider.name} · ${data.source !== data.provider.name ? data.source : tf}`;
-    $('chart-source').title = data.source;
+    const fellBack = (data.fallbackFrom || []).map((f) => `${f.provider}: ${f.error}`);
+    $('chart-source').textContent = `${fellBack.length ? '⚠ ' : ''}${data.provider.name} · ${data.source !== data.provider.name ? data.source : tf}`;
+    $('chart-source').title = fellBack.length ? `Fell back to ${data.provider.name} because\n${fellBack.join('\n')}` : data.source;
+    $('chart-source').classList.toggle('warn', fellBack.length > 0);
     if (data.stale) {
       FRESH.candles = { at: Date.parse(data.fetchedAt) || null, error: data.staleReason || 'provider failed; showing the last good candles' };
       renderAges('candles');
@@ -318,7 +326,7 @@ async function loadCandles({ incremental = false } = {}) {
     TS.candles = [];
     candleSeries.setData([]);
     volumeSeries.setData([]);
-    chartMessage(`<div><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> No chart for <b>${esc(symbol)}</b> (${tf})<br><span class="muted">${esc(e.message)}</span><br><span class="hint">Pick another timeframe, or change the instrument's provider in Settings → Instruments.</span><br>${retryButton('candles')}</div>`);
+    chartMessage(`<div><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> No chart for <b>${esc(symbol)}</b> (${tf})<br><span class="muted">${esc(e.message)}</span><br><span class="hint">Pick another timeframe or another source (plug button), or add a source.</span><br>${retryButton('candles')}</div>`);
     $('chart-source').textContent = '-';
     markError('candles', e.message);
     renderLegend(null);
@@ -409,18 +417,16 @@ function applyMarkers() {
   candleSeries.setMarkers(snapped);
 }
 
-// ---- pairs: watchlist and picker ------------------------------------------------
+// ---- pairs ---------------------------------------------------------------------------
 async function loadPairs() {
   try {
-    const data = await api('api/trading/pairs');
+    const data = await api('api/trading/pairs?all=1');
     TS.pairs = data.pairs || [];
     markFresh('pairs');
   } catch (e) {
     markError('pairs', e.message);
     if (!TS.pairs.length) showToast('Instruments', esc(e.message), 'error');
   }
-  renderWatchlist();
-  renderPickerList();
   renderScreener();
   if (TS.activeSymbol) updateHeader();
   document.dispatchEvent(new CustomEvent('ts:pairs'));
@@ -431,60 +437,6 @@ function matchesFilter(p, q, cat) {
   if (cat && cat !== 'ALL' && p.category !== cat) return false;
   if (!q) return true;
   return [p.symbol, p.name, p.exchange, p.provider_name, p.category].some((v) => String(v || '').toLowerCase().includes(q));
-}
-
-function renderWatchlist() {
-  const body = $('watchlist-body');
-  const q = $('watchlist-search').value.trim().toLowerCase();
-  const cat = $('watchlist-category').value;
-  const rows = TS.pairs.filter((p) => matchesFilter(p, q, cat));
-  if (!rows.length) {
-    body.innerHTML = '<div class="muted small" style="padding:12px">No instruments match.</div>';
-    return;
-  }
-  body.innerHTML = rows
-    .map((p) => `
-      <div class="wl-row${p.symbol === TS.activeSymbol ? ' active' : ''}" data-symbol="${esc(p.symbol)}" title="${esc(p.provider_name || 'no provider')}">
-        <div><div class="wl-sym">${esc(p.symbol)}</div><div class="wl-sub">${esc(CATEGORY_LABELS[p.category] || p.category)} · ${esc(p.exchange || p.provider_name || '-')}</div></div>
-        <div class="wl-price">${fmtPrice(p.last_price)}</div>
-        <div class="wl-chg ${p.change_24h_pct === null ? 'muted' : changeClass(p.change_24h_pct)}">${fmtPct(p.change_24h_pct)}</div>
-      </div>`)
-    .join('');
-}
-
-let pickerFocus = -1;
-function renderPickerList() {
-  const list = $('pair-picker-list');
-  const q = $('pair-picker-search').value.trim().toLowerCase();
-  const rows = TS.pairs.filter((p) => matchesFilter(p, q));
-  const groups = {};
-  rows.forEach((p) => (groups[p.category] = groups[p.category] || []).push(p));
-  pickerFocus = -1;
-  $('pair-picker-search').removeAttribute('aria-activedescendant');
-  let optionIndex = 0;
-  list.innerHTML = rows.length
-    ? Object.entries(groups)
-        .map(([cat, ps]) => `<div class="pair-group">${esc(CATEGORY_LABELS[cat] || cat)}</div>` +
-          ps.map((p) => `
-            <div class="pair-option${p.symbol === TS.activeSymbol ? ' active' : ''}" role="option" id="pair-opt-${optionIndex++}" aria-selected="${p.symbol === TS.activeSymbol}" data-symbol="${esc(p.symbol)}">
-              <span><span class="sym">${esc(p.symbol)}</span> <span class="prov">${esc(p.provider_name || 'no provider')}</span></span>
-              <span class="mono">${fmtPrice(p.last_price)}</span>
-              <span class="mono ${p.change_24h_pct === null ? 'muted' : changeClass(p.change_24h_pct)}">${fmtPct(p.change_24h_pct)}</span>
-            </div>`).join(''))
-        .join('')
-    : '<div class="muted small" style="padding:10px">No instruments match.</div>';
-}
-
-function openPicker(open) {
-  const menu = $('pair-picker-menu');
-  const show = open === undefined ? menu.classList.contains('hidden') : open;
-  menu.classList.toggle('hidden', !show);
-  $('pair-picker-btn').setAttribute('aria-expanded', String(show));
-  if (show) {
-    $('pair-picker-search').value = '';
-    renderPickerList();
-    setTimeout(() => $('pair-picker-search').focus(), 0);
-  }
 }
 
 function updateHeader() {
@@ -501,8 +453,7 @@ function selectPair(symbol, { switchTab = false } = {}) {
   TS.activeSymbol = symbol;
   storage.set('symbol', symbol);
   updateHeader();
-  renderWatchlist();
-  openPicker(false);
+  document.dispatchEvent(new CustomEvent('ts:symbol', { detail: symbol }));
   if (switchTab) showTab('chart');
   if (changed) syncUrl(true);
   if (!changed && TS.candles.length) return;
@@ -514,6 +465,7 @@ function selectPair(symbol, { switchTab = false } = {}) {
   $('active-price').textContent = '-';
   $('active-change').textContent = '';
   $('ob-mid-price').textContent = '-';
+  loadSources();
   loadCandles();
   loadMarkers();
   loadOrderbook();
@@ -521,6 +473,35 @@ function selectPair(symbol, { switchTab = false } = {}) {
   loadNews();
 }
 TS.selectPair = selectPair;
+
+// Data source choice for the chart: "Auto" (priority order) or one listing.
+async function loadSources() {
+  const symbol = TS.activeSymbol;
+  const select = $('source-select');
+  try {
+    const d = await api(`api/instruments/${encodeURIComponent(symbol)}`);
+    if (symbol !== TS.activeSymbol) return;
+    TS.listings = d.listings;
+    const chosen = TS.sourceChoice[symbol];
+    if (chosen && !d.listings.some((l) => l.id === chosen)) delete TS.sourceChoice[symbol];
+    select.innerHTML = [`<option value="">Auto (${d.listings.length} source${d.listings.length === 1 ? '' : 's'})</option>`]
+      .concat(d.listings.map((l) => `<option value="${l.id}" ${l.enabled && l.provider.enabled ? '' : 'disabled'}>${esc(l.provider.name)}${l.provider_symbol ? ` · ${esc(l.provider_symbol)}` : ''}${l.enabled ? '' : ' (off)'}</option>`))
+      .join('');
+    select.value = TS.sourceChoice[symbol] ? String(TS.sourceChoice[symbol]) : '';
+  } catch (e) {
+    select.innerHTML = '<option value="">Auto</option>';
+  }
+}
+TS.loadSources = loadSources;
+
+function chooseSource(listingId) {
+  const symbol = TS.activeSymbol;
+  if (listingId) TS.sourceChoice[symbol] = Number(listingId);
+  else delete TS.sourceChoice[symbol];
+  storage.set('sources', TS.sourceChoice);
+  TS.candles = [];
+  loadCandles();
+}
 
 function setTimeframe(tf) {
   if (!TIMEFRAMES.includes(tf)) return;
@@ -737,12 +718,13 @@ async function loadOverview() {
 // ---- screener ----------------------------------------------------------------------
 let screenerCat = 'ALL';
 function renderScreener() {
-  const counts = TS.pairs.reduce((acc, p) => ((acc[p.category] = (acc[p.category] || 0) + 1), acc), {});
+  const pool = $('screener-inactive').checked ? TS.pairs : TS.pairs.filter((p) => p.is_active !== false);
+  const counts = pool.reduce((acc, p) => ((acc[p.category] = (acc[p.category] || 0) + 1), acc), {});
   $('screener-cats').innerHTML = ['ALL', ...Object.keys(CATEGORY_LABELS)]
-    .map((c) => `<button type="button" class="tf-btn${c === screenerCat ? ' active' : ''}" aria-pressed="${c === screenerCat}" data-cat="${c}">${c === 'ALL' ? 'All' : CATEGORY_LABELS[c]} (${c === 'ALL' ? TS.pairs.length : counts[c] || 0})</button>`)
+    .map((c) => `<button type="button" class="tf-btn${c === screenerCat ? ' active' : ''}" aria-pressed="${c === screenerCat}" data-cat="${c}">${c === 'ALL' ? 'All' : CATEGORY_LABELS[c]} (${c === 'ALL' ? pool.length : counts[c] || 0})</button>`)
     .join('');
   const q = $('screener-search').value.trim().toLowerCase();
-  const rows = TS.pairs.filter((p) => matchesFilter(p, q, screenerCat));
+  const rows = pool.filter((p) => matchesFilter(p, q, screenerCat));
   $('screener-count').textContent = `(${rows.length})`;
   $('screener-tbody').innerHTML = rows.length
     ? rows
@@ -751,15 +733,16 @@ function renderScreener() {
             <td><strong>${esc(p.symbol)}</strong></td>
             <td><span class="pill ${CATEGORY_PILL[p.category] || 'pill-gray'}">${esc(CATEGORY_LABELS[p.category] || p.category)}</span></td>
             <td>${esc(p.exchange || '-')}</td>
-            <td>${p.provider_name ? esc(p.provider_name) : '<span class="neg">none</span>'}</td>
+            <td>${p.provider_name ? `${esc(p.provider_name)}${p.listing_count > 1 ? ` <span class="muted">+${p.listing_count - 1}</span>` : ''}` : '<span class="neg">none</span>'}${p.is_active === false ? ' <span class="pill pill-gray">inactive</span>' : ''}</td>
             <td class="r mono">${fmtPrice(p.last_price)}</td>
             <td class="r ${p.change_24h_pct === null ? 'muted' : changeClass(p.change_24h_pct)}">${fmtPct(p.change_24h_pct)}</td>
             <td class="r">${p.volume_24h_usd === null ? '-' : '$' + fmtCompact(p.volume_24h_usd)}</td>
             <td>${p.profit_score !== null && p.profit_score !== undefined ? `${p.profit_score}${p.score_grade ? ` (${esc(p.score_grade)})` : ''}` : '<span class="muted">-</span>'}</td>
             <td class="muted">${ago(p.updated_at)}</td>
+            <td class="r nowrap"><button type="button" class="icon-btn" data-add-to-list="${esc(p.symbol)}" title="Add to the current watchlist" aria-label="Add ${esc(p.symbol)} to the watchlist"><i class="fa-solid fa-plus" aria-hidden="true"></i></button> <button type="button" class="icon-btn" data-sources="${esc(p.symbol)}" title="Data sources" aria-label="Data sources of ${esc(p.symbol)}"><i class="fa-solid fa-plug" aria-hidden="true"></i></button></td>
           </tr>`)
         .join('')
-    : '<tr><td colspan="9" class="empty">No instruments match.</td></tr>';
+    : '<tr><td colspan="10" class="empty">No instruments match.</td></tr>';
 }
 
 // ---- engine tables ---------------------------------------------------------------
@@ -898,6 +881,11 @@ function showTab(tab) {
   document.dispatchEvent(new CustomEvent('ts:tab', { detail: tab }));
 }
 TS.showTab = showTab;
+TS.reloadCandles = () => loadCandles();
+TS.openSettings = (pane) => {
+  if (TS.setSettingsPane) TS.setSettingsPane(pane);
+  showTab('settings');
+};
 
 // ---- wiring --------------------------------------------------------------------------
 function setWatchlistVisible(visible) {
@@ -962,46 +950,19 @@ function bindEvents() {
   });
   $('btn-watchlist').addEventListener('click', () => setWatchlistVisible($('markets-layout').classList.contains('no-watchlist')));
 
-  $('watchlist-search').addEventListener('input', renderWatchlist);
-  $('watchlist-category').addEventListener('change', () => {
-    storage.set('wlcat', $('watchlist-category').value);
-    renderWatchlist();
-  });
+  $('source-select').addEventListener('change', (e) => chooseSource(e.target.value));
+  $('screener-inactive').addEventListener('change', renderScreener);
 
   // Any element with data-symbol opens that pair on the chart.
   document.addEventListener('click', (e) => {
     const target = e.target.closest('[data-symbol]');
-    if (!target || target.closest('#tab-settings')) return;
+    if (!target || target.closest('#tab-settings') || target.closest('.modal-backdrop') || e.target.closest('button[data-add-to-list], button[data-sources], button[data-remove-item]')) return;
     const symbol = target.dataset.symbol;
     if (!pairBySymbol(symbol)) {
-      showToast('Not registered', `${esc(symbol)} is not in the instrument registry; add it in Settings → Instruments.`, 'error');
+      showToast('Not registered', `${esc(symbol)} is not in the instrument registry; find and add it with search (Ctrl+K).`, 'error');
       return;
     }
     selectPair(symbol, { switchTab: !target.closest('#tab-chart') });
-  });
-
-  $('pair-picker-btn').addEventListener('click', () => openPicker());
-  $('pair-picker-search').addEventListener('input', renderPickerList);
-  $('pair-picker-search').addEventListener('keydown', (e) => {
-    const options = [...document.querySelectorAll('#pair-picker-list .pair-option')];
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      pickerFocus = Math.max(0, Math.min(options.length - 1, pickerFocus + (e.key === 'ArrowDown' ? 1 : -1)));
-      options.forEach((o, i) => o.classList.toggle('focused', i === pickerFocus));
-      if (options[pickerFocus]) {
-        options[pickerFocus].scrollIntoView({ block: 'nearest' });
-        $('pair-picker-search').setAttribute('aria-activedescendant', options[pickerFocus].id);
-      }
-    } else if (e.key === 'Enter') {
-      const pick = options[pickerFocus] || options[0];
-      if (pick) selectPair(pick.dataset.symbol);
-    } else if (e.key === 'Escape') {
-      openPicker(false);
-      $('pair-picker-btn').focus();
-    }
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('#pair-picker')) openPicker(false);
   });
 
   $('screener-search').addEventListener('input', renderScreener);
@@ -1015,13 +976,6 @@ function bindEvents() {
   $('btn-submit-order').addEventListener('click', submitTestOrder);
   $('btn-clear-logs').addEventListener('click', () => ($('log-console').innerHTML = ''));
 
-  // Keyboard: "/" opens the pair picker.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && TS.activeTab === 'chart') {
-      e.preventDefault();
-      openPicker(true);
-    }
-  });
 }
 
 async function init() {
@@ -1040,7 +994,7 @@ async function init() {
     b.classList.toggle('active', !!TS.indicators[b.dataset.indicator]);
     b.setAttribute('aria-pressed', String(!!TS.indicators[b.dataset.indicator]));
   });
-  $('watchlist-category').value = storage.get('wlcat', 'ALL');
+  TS.sourceChoice = storage.get('sources', {}) || {};
   setWatchlistVisible(storage.get('watchlist', true));
 
   await loadPairs();
@@ -1054,7 +1008,7 @@ async function init() {
   if (route && route.pane && TS.setSettingsPane) TS.setSettingsPane(route.pane);
   routing = true;
   if (symbol) selectPair(symbol);
-  else chartMessage('No instruments yet. Add one in Settings → Instruments.');
+  else chartMessage('No instruments yet. Press Ctrl+K to find and add one.');
   routing = false;
 
   const tab = route ? route.tab : storage.get('tab', 'chart');

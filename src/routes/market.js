@@ -32,13 +32,13 @@ module.exports = function marketRoutes({ instruments, marketData, settings, audi
     const q = req.valid.query;
     const s = settings.values;
     const limit = Math.max(20, Math.min(q.limit || s.candleLimit, 1000));
-    res.json(await marketData.candles({ symbol: symbolOf(req), tf: q.tf || s.defaultTimeframe, limit }).catch(asUpstream));
+    res.json(await marketData.candles({ symbol: symbolOf(req), tf: q.tf || s.defaultTimeframe, limit, listingId: q.listing }).catch(asUpstream));
   });
 
   router.get('/api/trading/orderbook', validate({ query: schemas.symbolQuery }), async (req, res) => {
     const symbol = symbolOf(req);
-    const { provider, book } = await marketData.orderbook(symbol).catch(asUpstream);
-    res.json({ success: true, symbol, provider: provider.name, bids: book.bids, asks: book.asks });
+    const { provider, listing, book } = await marketData.orderbook(symbol).catch(asUpstream);
+    res.json({ success: true, symbol, provider: provider.name, listing, bids: book.bids, asks: book.asks });
   });
 
   // Kept for existing callers (software_tester): Binance spot depth by exchange symbol.

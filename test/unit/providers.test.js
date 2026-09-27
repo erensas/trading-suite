@@ -75,3 +75,17 @@ test('getJson marks 5xx, 429 and unreachable hosts as transient, 4xx not', async
   await assert.rejects(getJson(`${base}/404`), (e) => e.transient === false && /HTTP 404 \(status 404\)/.test(e.message));
   await assert.rejects(getJson('http://127.0.0.1:1/'), (e) => e.transient === true && e.code === 'provider_unreachable');
 });
+
+test('rankMatches: exact base first, USDT before other quotes, prefix before substring', () => {
+  const { rankMatches } = _internal;
+  const rows = [
+    { base: 'WBTC', quote: 'USDT' },
+    { base: 'BTC', quote: 'EUR' },
+    { base: 'BTC', quote: 'USDT' },
+    { base: 'BTCDOM', quote: 'USDT' },
+    { base: 'ETH', quote: 'BTC' },
+  ];
+  assert.deepEqual(rankMatches(rows, 'btc').map((r) => `${r.base}/${r.quote}`), ['BTC/USDT', 'BTC/EUR', 'BTCDOM/USDT', 'WBTC/USDT']);
+  assert.deepEqual(rankMatches(rows, 'btc/usdt').map((r) => `${r.base}/${r.quote}`), ['BTC/USDT']);
+  assert.deepEqual(rankMatches(rows, ''), []);
+});

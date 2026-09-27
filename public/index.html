@@ -54,15 +54,11 @@
       <section id="tab-chart" class="tab-content" role="tabpanel" aria-labelledby="tabbtn-chart">
         <div class="chart-toolbar">
           <div class="pair-picker" id="pair-picker">
-            <button type="button" class="pair-picker-btn" id="pair-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+            <button type="button" class="pair-picker-btn" id="pair-picker-btn" aria-haspopup="dialog" title="Search symbols (Ctrl+K or /)">
               <span id="active-symbol-title">-</span>
               <span class="pill pill-blue" id="active-category-pill">-</span>
-              <i class="fa-solid fa-chevron-down"></i>
+              <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
             </button>
-            <div class="pair-picker-menu hidden" id="pair-picker-menu">
-              <input type="search" id="pair-picker-search" placeholder="Search pairs…" autocomplete="off" role="combobox" aria-controls="pair-picker-list" aria-expanded="true" aria-autocomplete="list" aria-label="Search pairs">
-              <div class="pair-picker-list" id="pair-picker-list" role="listbox" aria-label="Pairs"></div>
-            </div>
           </div>
           <div class="price-now"><span id="active-price">-</span> <span id="active-change" class="change">-</span></div>
           <div class="tf-btn-group" id="tf-group" role="group" aria-label="Timeframe"></div>
@@ -73,23 +69,23 @@
             <button type="button" class="tf-btn" id="btn-markers" title="Trade markers and open-trade lines" aria-pressed="true"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Trades</button>
             <button type="button" class="tf-btn" id="btn-watchlist" title="Show or hide the pair list" aria-label="Pair list" aria-pressed="true"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>
           </div>
+          <div class="source-box">
+            <label class="source-select"><span class="sr-only">Data source</span><select id="source-select" aria-label="Data source"><option value="">Auto</option></select></label>
+            <button type="button" class="tf-btn" id="btn-sources" title="Data sources of this instrument" aria-label="Data sources"><i class="fa-solid fa-plug" aria-hidden="true"></i></button>
+          </div>
           <div class="source-note"><span id="chart-source">-</span> <span class="age" data-age="candles"></span></div>
         </div>
 
         <div class="markets-layout" id="markets-layout">
-          <aside class="card watchlist" id="watchlist">
+          <aside class="card watchlist" id="watchlist" aria-label="Watchlist">
             <div class="watchlist-head">
-              <input type="search" id="watchlist-search" placeholder="Filter…" autocomplete="off">
-              <select id="watchlist-category" aria-label="Category">
-                <option value="ALL">All</option>
-                <option value="CEX">CEX spot</option>
-                <option value="CEX_FUTURES">CEX futures</option>
-                <option value="DEX">DEX</option>
-                <option value="TRADFI">TradFi</option>
-              </select>
+              <select id="wl-select" aria-label="Watchlist"></select>
+              <button type="button" class="icon-btn" id="wl-add" title="Add a symbol to this list" aria-label="Add a symbol"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+              <button type="button" class="icon-btn" id="wl-manage" title="Manage watchlists" aria-label="Manage watchlists"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
             </div>
-            <div class="watchlist-cols"><span>Pair</span><span>Price</span><span>24h</span></div>
-            <div class="watchlist-body" id="watchlist-body"><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div></div>
+            <input type="search" id="watchlist-search" placeholder="Filter this list…" autocomplete="off" aria-label="Filter this list">
+            <div class="watchlist-cols" id="wl-cols"></div>
+            <div class="watchlist-body" id="watchlist-body" role="list"><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div></div>
           </aside>
 
           <div class="card chart-card">
@@ -159,14 +155,16 @@
             <div class="toolbar-row">
               <div class="tf-btn-group" id="screener-cats"></div>
               <input type="search" id="screener-search" placeholder="Search symbol, exchange, provider…">
+              <label class="check small"><input type="checkbox" id="screener-inactive"> Inactive too</label>
+              <button type="button" class="pill pill-green" data-open-search><i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i> Find new symbols</button>
               <a href="api/trading/export/trades?format=csv" download class="pill pill-green"><i class="fa-solid fa-file-csv"></i> CSV</a>
               <a href="api/trading/export/trades?format=json" download class="pill pill-blue"><i class="fa-solid fa-file-code"></i> JSON</a>
             </div>
           </div>
           <div class="table-container">
             <table>
-              <thead><tr><th>Symbol</th><th>Category</th><th>Exchange</th><th>Provider</th><th class="r">Last price</th><th class="r">24h</th><th class="r">24h volume</th><th>Economist</th><th>Updated</th></tr></thead>
-              <tbody id="screener-tbody"><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="9"><div class="skeleton sk-line"></div></td></tr></tbody>
+              <thead><tr><th>Symbol</th><th>Category</th><th>Exchange</th><th>Sources</th><th class="r">Last price</th><th class="r">24h</th><th class="r">24h volume</th><th>Economist</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="screener-tbody"><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr><tr class="sk-tr"><td colspan="10"><div class="skeleton sk-line"></div></td></tr></tbody>
             </table>
           </div>
         </div>
@@ -274,11 +272,11 @@
 
         <div class="settings-pane hidden" id="settings-instruments">
           <div class="card">
-            <div class="card-header"><div class="card-title"><i class="fa-solid fa-coins"></i> Instruments</div><button class="pill pill-green" id="btn-add-instrument"><i class="fa-solid fa-plus"></i> Add instrument</button></div>
+            <div class="card-header"><div class="card-title"><i class="fa-solid fa-coins"></i> Instruments</div><span class="toolbar-row"><button class="pill pill-green" data-open-search><i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i> Find and add</button><button class="pill pill-gray" id="btn-add-instrument"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add by hand</button></span></div>
             <div class="toolbar-row"><input type="search" id="instruments-search" placeholder="Filter…"><label class="check"><input type="checkbox" id="instruments-show-inactive"> Show inactive</label></div>
             <div class="table-container">
               <table>
-                <thead><tr><th>Symbol</th><th>Category</th><th>Provider</th><th>Provider symbol</th><th>Contract / network</th><th>Active</th><th></th></tr></thead>
+                <thead><tr><th>Symbol</th><th>Category</th><th>Sources (in order)</th><th>Contract / network</th><th>Active</th><th></th></tr></thead>
                 <tbody id="instruments-tbody"></tbody>
               </table>
             </div>
@@ -344,10 +342,76 @@
     </form>
   </div>
 
+  <!-- Search and command palette (Ctrl+K) -->
+  <div id="search-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="search-title">
+    <div class="modal-card search-card">
+      <h2 id="search-title" class="sr-only">Search symbols and commands</h2>
+      <div class="search-head">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input id="search-input" type="search" placeholder="Symbol, name, contract address or command…" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="search-results" aria-autocomplete="list">
+      </div>
+      <div class="search-bar">
+        <div class="tf-btn-group" id="search-scope" role="group" aria-label="Where to search">
+          <button type="button" class="tf-btn active" data-scope="default" aria-pressed="true">Exchanges &amp; stocks</button>
+          <button type="button" class="tf-btn" data-scope="cex" aria-pressed="false">Crypto exchanges</button>
+          <button type="button" class="tf-btn" data-scope="dex" aria-pressed="false" title="GeckoTerminal allows a few searches a minute">DEX pools</button>
+          <button type="button" class="tf-btn" data-scope="tradfi" aria-pressed="false">Stocks &amp; ETFs</button>
+        </div>
+        <label class="inline-label">Add to <select id="search-target-list" aria-label="Watchlist to add to"></select></label>
+      </div>
+      <div id="search-results" class="search-results" role="listbox" aria-label="Results"></div>
+      <div class="hint search-hint">↑ ↓ move · Enter open · Ctrl+Enter add to the list · Esc close. Provider search starts after two characters; badges are the providers that carry the symbol (✓ already a source).</div>
+    </div>
+  </div>
+
+  <!-- Data sources of one instrument -->
+  <div id="sources-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="sources-title">
+    <div class="modal-card wide sources-card">
+      <div class="modal-head-row"><div id="sources-title" class="modal-title">Sources</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="hint">The chart and prices use the first enabled source that answers; drag the order with the arrows. The first one is also what other scripts see in <code>instrument_registry</code>.</div>
+      <div class="table-container">
+        <table>
+          <thead><tr><th>#</th><th>Provider</th><th>Provider symbol</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="sources-tbody"></tbody>
+        </table>
+      </div>
+      <div class="sources-add">
+        <div class="card-title small">Add a source</div>
+        <div class="toolbar-row">
+          <button type="button" class="pill pill-blue" id="sources-find"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find on other providers</button>
+        </div>
+        <div id="sources-candidates" class="candidates"></div>
+        <form id="sources-manual" class="sources-manual">
+          <select name="provider_id" aria-label="Provider"></select>
+          <input name="provider_symbol" placeholder="Provider symbol (optional)" aria-label="Provider symbol">
+          <input name="network" placeholder="Network (DEX)" aria-label="Network">
+          <button type="submit" class="btn-secondary">Add</button>
+        </form>
+      </div>
+      <div class="sources-lists">
+        <div class="card-title small">On watchlists</div>
+        <div id="sources-lists" class="chip-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage watchlists -->
+  <div id="lists-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="lists-title">
+    <div class="modal-card wide">
+      <div class="modal-head-row"><div id="lists-title" class="modal-title">Watchlists</div><button type="button" class="icon-btn" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div id="lists-body" class="lists-body"></div>
+      <form id="lists-new" class="toolbar-row">
+        <input name="name" placeholder="New list name" aria-label="New list name" maxlength="60" required>
+        <button type="submit" class="btn-buy"><i class="fa-solid fa-plus" aria-hidden="true"></i> Create</button>
+      </form>
+    </div>
+  </div>
+
   <div id="toast-container" role="status" aria-live="polite"></div>
 
   <script src="shell.js"></script>
   <script src="app.js"></script>
+  <script src="watchlists.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

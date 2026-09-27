@@ -7,7 +7,7 @@ const { providerFromRow } = require('../services/instruments');
 const GECKO_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const WORKERS = 3;
 
-function createTickerRefresh({ db, providers, settings, log }) {
+function createTickerRefresh({ db, providers, instruments, settings, log }) {
   const state = { running: false, lastRunAt: null, updated: 0, failed: 0, errors: {} };
   let timer = null;
   let stopped = false;
@@ -39,6 +39,8 @@ function createTickerRefresh({ db, providers, settings, log }) {
       errors[symbol] = String(e.message || e).slice(0, 200);
     };
     try {
+      // Instruments that other scripts added with a provider get their listing row.
+      if (instruments) await instruments.backfillListings().catch((e) => log.warn({ error: e.message }, 'listing backfill failed'));
       const r = await db.query(`
         SELECT ir.*, mp.id AS p_id, mp.name AS p_name, mp.kind AS p_kind, mp.base_url AS p_base_url, mp.enabled AS p_enabled,
                mp.config AS p_config, mp.credential_env AS p_credential_env

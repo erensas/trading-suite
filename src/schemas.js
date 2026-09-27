@@ -80,7 +80,8 @@ const idParam = z.object({ id: z.coerce.number({ error: 'id must be a number' })
 
 // ---- instruments -------------------------------------------------------------------------
 const INSTRUMENT_CATEGORIES = ['CEX', 'CEX_FUTURES', 'DEX', 'TRADFI'];
-const SYMBOL = /^[A-Z0-9._₮^-]{1,24}(\/[A-Z0-9._₮-]{1,24})?$/iu;
+// BASE/QUOTE, BASE/QUOTE:SETTLE (futures, as ccxt and Freqtrade write them), or a ticker.
+const SYMBOL = /^[A-Z0-9._₮^-]{1,24}(\/[A-Z0-9._₮-]{1,24}(:[A-Z0-9₮]{1,12})?)?$/iu;
 const upperText = (max) => optionalText(max).transform((v) => (v ? v.toUpperCase() : null));
 
 const instrument = z
@@ -105,17 +106,61 @@ const instrument = z
     is_active: boolish.default(true),
   })
   .transform((i) => {
-    const [b, q] = i.symbol.split('/');
+    const [b, rest] = i.symbol.split('/');
+    const q = rest ? rest.split(':')[0] : null;
     return { ...i, base_asset: i.base_asset || b, quote_asset: i.quote_asset || q || 'USD' };
   });
 
 const symbolParam = z.object({ symbol: z.string().min(1).max(60) });
+
+// ---- listings (several providers per instrument) --------------------------------------------
+const listing = z.object({
+  provider_id: z.coerce.number({ error: 'provider_id is required' }).int().positive('provider_id must be a provider id'),
+  provider_symbol: optionalText(120),
+  network: optionalText(40).transform((v) => (v ? v.toLowerCase() : null)),
+  priority: z.coerce.number().int().min(0).max(1000).optional(),
+  enabled: boolish.default(true),
+});
+const reorderIds = z.object({ ids: z.array(z.coerce.number().int().positive()).min(1).max(50) });
+
+const importInstrument = z.object({
+  symbol: z.string().trim().min(1).max(50),
+  category: z.string(),
+  name: z.string().max(200).nullish(),
+  base_asset: z.string().max(20).nullish(),
+  quote_asset: z.string().max(20).nullish(),
+  exchange: z.string().max(50).nullish(),
+  contract_address: z.string().max(120).nullish(),
+  network: z.string().max(40).nullish(),
+  listings: z.array(listing).min(1, 'at least one provider is required').max(10),
+  watchlist_id: z.coerce.number().int().positive().nullish(),
+});
+
+// ---- watchlists ------------------------------------------------------------------------------
+const WATCHLIST_COLUMNS = ['price', 'change', 'volume', 'provider', 'score', 'updated'];
+const WATCHLIST_SORTS = ['manual', 'symbol', 'price', 'change', 'volume'];
+const watchlist = z.object({
+  name: z.string().trim().min(1, 'name must be 1-60 characters').max(60, 'name must be 1-60 characters'),
+  columns: z.array(z.enum(WATCHLIST_COLUMNS, { error: `columns: one of ${WATCHLIST_COLUMNS.join(', ')}` })).max(WATCHLIST_COLUMNS.length).default(['price', 'change', 'volume']),
+  sort: z.object({ by: z.enum(WATCHLIST_SORTS).default('manual'), dir: z.enum(['asc', 'desc']).default('asc') }).default({ by: 'manual', dir: 'asc' }),
+  is_default: boolish.default(false),
+  position: z.coerce.number().int().min(0).max(1000).optional(),
+});
+const watchlistItem = z.object({ symbol: z.string().trim().min(1).max(60) });
+const reorderSymbols = z.object({ symbols: z.array(z.string().min(1).max(60)).max(1000) });
+const watchlistItemParams = z.object({ id: z.coerce.number().int().positive(), symbol: z.string().min(1).max(60) });
+
+const searchQuery = z.object({
+  q: z.string().trim().min(1, 'q is required').max(60),
+  providers: z.string().max(200).optional(),
+});
 
 // ---- market data and reports ---------------------------------------------------------------
 const symbolQuery = z.object({ symbol: z.string().trim().min(1).max(60).optional() });
 const candlesQuery = symbolQuery.extend({
   tf: z.enum(TIMEFRAMES, { error: `tf must be one of ${TIMEFRAMES.join(', ')}` }).optional(),
   limit: z.coerce.number({ error: 'limit must be a number' }).int().min(1).max(5000).optional(),
+  listing: z.coerce.number().int().positive().optional(),
 });
 const pairsQuery = z.object({ all: z.enum(['0', '1']).optional() });
 const exportQuery = z.object({
@@ -154,6 +199,15 @@ module.exports = {
   INSTRUMENT_CATEGORIES,
   instrument,
   symbolParam,
+  listing,
+  reorderIds,
+  importInstrument,
+  WATCHLIST_COLUMNS,
+  watchlist,
+  watchlistItem,
+  reorderSymbols,
+  watchlistItemParams,
+  searchQuery,
   symbolQuery,
   candlesQuery,
   pairsQuery,

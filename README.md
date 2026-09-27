@@ -6,7 +6,7 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
 
 ## Views
 
-- **Markets**: pair list, chart and side panel in one view. A searchable pair picker sits above the chart (press `/`), and the list can be hidden. The chart shows candles and volume from the instrument's data provider, SMA/EMA overlays, and Freqtrade, Web3 and test-order markers. The side panel holds the order book (where the provider has one), a simulated test order, the economist signal, news and a risk calculator.
+- **Markets**: watchlist, chart and side panel in one view. The watchlist panel switches between named lists (see below); the chart shows candles and volume from the instrument's data sources, overlays, and Freqtrade, Web3 and test-order markers. The side panel holds the order book (where a source has one), a simulated test order, the economist signal, news and a risk calculator.
 - **Screener**: every active instrument with price, 24 h change and volume, provider and economist score. Click a row to chart it.
 - **Freqtrade**: live bot configuration, performance, whitelist and open trades from the Freqtrade API, plus trade history from `trade_db`.
 - **Web3 DEX** and **Logs**: Web3 executions and the live Web3 supervisor log. CEX trading is the Freqtrade view.
@@ -16,10 +16,16 @@ Served by `trading-suite.service` on `127.0.0.1:18795`, published by Caddy on th
   - Instruments: add a pair, pick its provider and provider symbol, and activate or deactivate it.
   - Integrations: status of the database, Freqtrade API, Web3 heartbeat, system dashboard, providers and the price refresh.
 
+### Watchlists, search and data sources
+
+- **Watchlists**: any number of named lists (starter lists: Main, Crypto spot, Crypto futures, DEX pools, Stocks & ETFs). Each list has its own columns (price, 24 h change, volume, source, economist score, last update) and sort order (manual, symbol, price, change, volume); in manual order rows move by drag and drop or Alt+↑ / Alt+↓. Manage lists with the gear button: rename, reorder, default list, columns, sort, delete. An instrument can be on several lists; the Sources dialog shows and toggles them.
+- **Search (Ctrl+K or `/`)**: one box for registered instruments, provider catalogues and commands (go to a view or settings pane). Provider search covers Binance spot and USD-M futures, OKX, Bybit and Yahoo Finance (stocks, ETFs, indices); "DEX pools" asks GeckoTerminal (a few searches a minute), as does a contract address. Results are merged by symbol, with a badge per provider that carries it (✓ already a source). **Add** registers the instrument with every offered source and puts it on the chosen list; a badge adds that source only. Futures use the ccxt form `BASE/QUOTE:SETTLE` (e.g. `BTC/USDT:USDT`), so they never mix with spot.
+- **Several sources per instrument** (`instrument_listings`): the chart and prices use the first enabled source in priority order that answers, and the source note shows ⚠ when it had to fall back. The plug button next to the chart opens the Sources dialog: reorder, enable or disable, edit the provider symbol, test each source, find the same pair on other providers, add one by hand. The source menu beside it pins the chart to one source. The first source is mirrored into `instrument_registry.provider_id` for the scripts that still read it; registry rows those scripts add get their source row on the next price refresh.
+
 ### Links and keyboard
 
 - The address bar holds the view: `#markets/<pair>/<timeframe>` (pair URL-encoded, e.g. `#markets/BTC%2FUSDT/1h`), `#screener`, `#freqtrade`, `#dex`, `#settings/<general|providers|instruments|integrations>`, `#logs`; the shell adds `#system` and `#frequi`. Back and Forward move between views and pairs.
-- `/` opens the pair picker; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
+- Ctrl+K or `/` opens search; arrow keys, Home and End move between tabs; modals keep focus inside and return it on close.
 - Every panel shows how old its data is; the label turns amber when an update failed or the data is older than expected, and failed panels have a Retry button.
 - Prices below 0.001 use subscript zeros (`0.0₅436` = 0.00000436); changes carry ▲ / ▼ as well as colour.
 - The chart legend shows OHLCV for the bar under the cursor. With "Trades" on, open Freqtrade trades on the pair are drawn as entry, stop-loss and liquidation lines.
@@ -65,7 +71,7 @@ Every provider call goes through `lib/resilience.js`:
 - Every state-changing call except the simulated test order needs the `X-Trading-Control: 1` header and a same-origin `Origin`. This covers the kill switch, settings, providers and instruments.
 - The service connects to PostgreSQL over the Unix socket with peer authentication, so it needs no DB password.
 - Front-end libraries (Font Awesome, Lightweight Charts, Inter and JetBrains Mono) are npm dependencies served from `node_modules` under `/vendor`; the page loads nothing from other hosts, and the Content-Security-Policy allows only `'self'` for scripts, styles and fonts.
-- Changes to settings, providers and instruments are written to `suite_audit_log` with the caller's Tailscale login and device.
+- Changes to settings, providers, instruments, sources and watchlists are written to `suite_audit_log` with the caller's Tailscale login and device.
 - Freqtrade API credentials come from `~/.openclaw/credentials/freqtrade.env`.
 
 ## Database
@@ -85,6 +91,7 @@ Each file runs in one transaction with its `schema_migrations` row, and an advis
 - `002_mark_synthetic_trade_logs.sql`: flags synthetic Web3 rows.
 - `003_market_providers.sql`: `market_providers`, provider columns on `instrument_registry`, `suite_settings`, default providers and routing.
 - `004_suite_audit_log.sql`: audit log of UI changes.
+- `005_listings_watchlists.sql`: `instrument_listings` (several sources per instrument, copied from the old single provider), `watchlists` and `watchlist_items` with starter lists.
 
 The pool opens at most 10 connections (`PG_POOL_MAX`), waits 5 s for one, and every statement has a server-side `statement_timeout` of 10 s (`PG_STATEMENT_TIMEOUT_MS`).
 

@@ -10,6 +10,8 @@ const { createAudit } = require('./services/audit');
 const { createSettings } = require('./services/settings');
 const { createProviders } = require('./services/providers');
 const { createInstruments } = require('./services/instruments');
+const { createWatchlists } = require('./services/watchlists');
+const { createSearch } = require('./services/search');
 const { createMarketData } = require('./services/market-data');
 const { createControl } = require('./services/control');
 const { createReports } = require('./services/reports');
@@ -44,6 +46,8 @@ function createContext(overrides = {}) {
     })
   );
   make('marketData', () => createMarketData(ctx));
+  make('watchlists', () => createWatchlists(ctx));
+  make('search', () => createSearch(ctx));
   make('control', () => createControl(ctx));
   make('reports', () => createReports(ctx));
   make('tickerRefresh', () => createTickerRefresh(ctx));

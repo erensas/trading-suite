@@ -131,7 +131,11 @@ test('candles: unknown instrument is 404, a failing provider falls back to the c
     symbol: 'BTC/USDT', base_asset: 'BTC', quote_asset: 'USDT', provider_symbol: 'BTC/USDT',
     p_id: 9, p_name: 'Freqtrade Bot', p_kind: 'freqtrade', p_base_url: 'http://127.0.0.1:8080', p_enabled: true, p_config: {},
   };
-  const db = fakeDb([[/FROM instrument_registry ir LEFT JOIN market_providers/, (p) => (p[0] === 'BTC/USDT' ? [inst] : [])]]);
+  const listing = { id: 1, symbol: 'BTC/USDT', provider_id: 9, provider_symbol: 'BTC/USDT', network: null, priority: 0, enabled: true, p_id: 9, p_name: 'Freqtrade Bot', p_kind: 'freqtrade', p_base_url: 'http://127.0.0.1:8080', p_enabled: true, p_config: {} };
+  const db = fakeDb([
+    [/FROM instrument_listings l JOIN market_providers/, (p) => (p[0] === 'BTC/USDT' ? [listing] : [])],
+    [/FROM instrument_registry ir LEFT JOIN market_providers/, (p) => (p[0] === 'BTC/USDT' ? [inst] : [])],
+  ]);
   const freqtrade = fakeFreqtrade({
     'GET /pair_candles?pair=BTC%2FUSDT&timeframe=1h&limit=50': () => {
       if (fail) throw Object.assign(new Error('Freqtrade down'), { transient: true });

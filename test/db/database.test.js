@@ -178,3 +178,125 @@ test('API against the database: providers, instruments, settings, orders, audit'
   const ctlAudit = (await db.query('SELECT halted FROM trading_control_audit ORDER BY id')).rows.map((r) => r.halted);
   assert.deepEqual(ctlAudit, [true, false]);
 });
+
+// A guard that answers adapter calls from a table instead of the network:
+// answers[providerName][guard.method] = value | Error; anything else calls the adapter.
+function tableGuard(answers) {
+  return {
+    calls: [],
+    async run(provider, fn) {
+      this.calls.push(provider.name);
+      const a = (answers[provider.name] || {})[this.method];
+      if (a instanceof Error) throw a;
+      if (a !== undefined) return typeof a === 'function' ? a() : a;
+      return fn();
+    },
+    status: () => ({ state: 'closed', failures: 0, retryInS: 0, lastError: null, ratePerMin: null }),
+    forget() {},
+  };
+}
+
+test('phase A: several sources per instrument, fallback, order, import, watchlists', { skip }, async (t) => {
+  await resetSchema();
+  await withClient((c) => migrate.up(c, migrate.readMigrations(), quiet));
+  const log = createLogger('silent');
+  const db = createPool({ connectionString: URL_, max: 4, statementTimeoutMs: 3000 }, log);
+  const candle = (close) => [{ time: 1790000000, open: close, high: close, low: close, close, volume: 1 }];
+  const { ProviderError } = require('../../lib/providers');
+  const answers = {
+    'Binance Spot': { candles: new ProviderError('api.binance.com: HTTP 503', { transient: true }) },
+    OKX: { candles: candle(101) },
+  };
+  // The guard does not see which adapter method is called, so the test names it.
+  const guard = tableGuard(answers);
+  const app = await startApp({ db, guard, freqtrade: fakeFreqtrade({ 'GET /ping': { status: 'pong' } }) });
+  t.after(async () => {
+    await app.close();
+    await db.end();
+  });
+  const providers = (await app.request('GET', '/api/providers')).json.providers;
+  const id = (name) => providers.find((p) => p.name === name).id;
+
+  // Migration 005 made the old provider the primary source and seeded the lists.
+  const lists = (await app.request('GET', '/api/watchlists')).json.watchlists;
+  assert.deepEqual(lists.map((w) => w.name), ['Main', 'Crypto spot', 'Crypto futures', 'DEX pools', 'Stocks & ETFs']);
+  assert.equal(lists[0].is_default, true);
+
+  // Import a new instrument with two sources straight onto a list.
+  const imp = await app.request('POST', '/api/instruments/import', {
+    control: true,
+    body: {
+      symbol: 'ARB/USDT', category: 'CEX', base_asset: 'ARB', quote_asset: 'USDT', watchlist_id: lists[0].id,
+      listings: [{ provider_id: id('Binance Spot'), provider_symbol: 'ARBUSDT' }, { provider_id: id('OKX'), provider_symbol: 'ARB-USDT' }],
+    },
+  });
+  assert.equal(imp.status, 200, JSON.stringify(imp.json));
+  assert.equal(imp.json.created, true);
+  assert.equal(imp.json.listings.length, 2);
+  const again = await app.request('POST', '/api/instruments/import', { control: true, body: { symbol: 'arb/usdt', category: 'CEX', listings: [{ provider_id: id('OKX'), provider_symbol: 'ARB-USDT' }] } });
+  assert.equal(again.json.created, false);
+  assert.equal(again.json.listings.length, 0, 'an existing source is not added twice');
+
+  const detail = (await app.request('GET', '/api/instruments/ARB%2FUSDT')).json;
+  assert.deepEqual(detail.listings.map((l) => l.provider.name), ['Binance Spot', 'OKX']);
+  assert.equal(detail.instrument.provider_id, id('Binance Spot'), 'the primary source is mirrored into the registry');
+  assert.deepEqual(detail.watchlists, [lists[0].id]);
+
+  // Binance fails, so the chart falls back to OKX and says so.
+  guard.method = 'candles';
+  const c = await app.request('GET', '/api/trading/candles?symbol=ARB%2FUSDT&tf=1h&limit=50');
+  assert.equal(c.status, 200, JSON.stringify(c.json));
+  assert.equal(c.json.provider.name, 'OKX');
+  assert.equal(c.json.fallbackFrom[0].provider, 'Binance Spot');
+  // A chosen listing is used alone.
+  const only = await app.request('GET', `/api/trading/candles?symbol=ARB%2FUSDT&tf=1h&limit=50&listing=${detail.listings[0].id}`);
+  assert.equal(only.status, 502);
+
+  // Reorder: OKX first, mirrored into the registry.
+  const order = await app.request('PUT', '/api/instruments/ARB%2FUSDT/listings/order', { control: true, body: { ids: [detail.listings[1].id, detail.listings[0].id] } });
+  assert.equal(order.status, 200, JSON.stringify(order.json));
+  assert.equal(order.json.listings[0].provider.name, 'OKX');
+  const reg = (await db.query("SELECT provider_id FROM instrument_registry WHERE symbol = 'ARB/USDT'")).rows[0];
+  assert.equal(reg.provider_id, id('OKX'));
+  const badOrder = await app.request('PUT', '/api/instruments/ARB%2FUSDT/listings/order', { control: true, body: { ids: [detail.listings[1].id] } });
+  assert.equal(badOrder.status, 400);
+
+  // Disable one source, delete the other: the instrument has no provider left.
+  const dis = await app.request('PUT', `/api/listings/${detail.listings[1].id}`, { control: true, body: { enabled: false } });
+  assert.equal(dis.json.listing.enabled, false);
+  assert.equal(dis.json.listing.provider_symbol, 'ARB-USDT', 'fields not sent are kept');
+  await app.request('DELETE', `/api/listings/${detail.listings[0].id}`, { control: true });
+  const none = await app.request('GET', '/api/trading/candles?symbol=ARB%2FUSDT&tf=1h');
+  assert.equal(none.status, 409);
+  assert.match(none.json.error, /disabled/);
+
+  // Watchlists: create, add, reorder, default, delete.
+  const w = await app.request('POST', '/api/watchlists', { control: true, body: { name: 'Swing', columns: ['price', 'score'], sort: { by: 'change', dir: 'desc' } } });
+  assert.equal(w.status, 200, JSON.stringify(w.json));
+  const wid = w.json.watchlist.id;
+  assert.equal((await app.request('POST', '/api/watchlists', { control: true, body: { name: 'Swing' } })).status, 409);
+  assert.equal((await app.request('POST', `/api/watchlists/${wid}/items`, { control: true, body: { symbol: 'NOPE/USDT' } })).status, 404);
+  for (const s of ['ARB/USDT', 'SOL/USDT', 'BTC/USDT']) {
+    await db.query("INSERT INTO instrument_registry (symbol, category) VALUES ($1, 'CEX') ON CONFLICT DO NOTHING", [s]);
+    const r = await app.request('POST', `/api/watchlists/${wid}/items`, { control: true, body: { symbol: s } });
+    assert.equal(r.json.added, true);
+  }
+  const ro = await app.request('PUT', `/api/watchlists/${wid}/items`, { control: true, body: { symbols: ['BTC/USDT', 'ARB/USDT'] } });
+  assert.deepEqual(ro.json.order, ['BTC/USDT', 'ARB/USDT', 'SOL/USDT']);
+  const items = (await app.request('GET', `/api/watchlists/${wid}/items`)).json.items;
+  assert.deepEqual(items.map((i) => i.symbol), ['BTC/USDT', 'ARB/USDT', 'SOL/USDT']);
+  await app.request('DELETE', `/api/watchlists/${wid}/items/${encodeURIComponent('SOL/USDT')}`, { control: true });
+  const def = await app.request('PUT', `/api/watchlists/${wid}`, { control: true, body: { is_default: true } });
+  assert.equal(def.json.watchlist.is_default, true);
+  assert.deepEqual(def.json.watchlist.columns, ['price', 'score'], 'fields not sent are kept');
+  const defaults = (await db.query('SELECT count(*)::int AS n FROM watchlists WHERE is_default')).rows[0].n;
+  assert.equal(defaults, 1);
+  await app.request('DELETE', `/api/watchlists/${wid}`, { control: true });
+  const after = (await app.request('GET', '/api/watchlists')).json.watchlists;
+  assert.equal(after.filter((x) => x.is_default).length, 1, 'deleting the default list makes another one default');
+
+  // Registry rows written by other scripts get a listing on the next ticker run.
+  await db.query("INSERT INTO instrument_registry (symbol, category, provider_id) VALUES ('ZZZ/USDT', 'CEX', $1)", [id('Bybit')]);
+  const { createInstruments } = require('../../src/services/instruments');
+  assert.equal(await createInstruments({ db }).backfillListings(), 1);
+});

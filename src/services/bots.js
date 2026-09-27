@@ -18,12 +18,11 @@ const { TIMEFRAMES } = require('../../lib/providers');
 
 const NAME = /^[a-z0-9][a-z0-9-]{1,29}$/;
 const PAIR = /^[A-Z0-9]{1,20}\/[A-Z0-9]{1,12}(:[A-Z0-9]{1,12})?$/;
-const EXCHANGES = ['binance', 'bybit', 'okx', 'kraken', 'kucoin', 'gate', 'bitget', 'htx'];
 
 const createSchema = z.object({
   name: z.string().trim().toLowerCase().regex(NAME, 'name: 2-30 characters, lowercase letters, digits and dashes'),
   strategy: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{2,60}$/),
-  exchange: z.enum(EXCHANGES).default('binance'),
+  exchange: z.string().trim().toLowerCase().regex(/^[a-z0-9]{2,30}$/, 'exchange: a ccxt id such as binance').default('binance'),
   trading_mode: z.enum(['spot', 'futures']).default('spot'),
   pairs: z.array(z.string().trim().toUpperCase().regex(PAIR, 'pairs look like BTC/USDT')).min(1).max(30),
   timeframe: z.enum(TIMEFRAMES).nullish(),
@@ -55,7 +54,7 @@ function writeEnvFile(file, values, header) {
 
 const randomSecret = (bytes = 24) => crypto.randomBytes(bytes).toString('base64url');
 
-function createBots({ db, sysd, strategies, control, freqtrade, config, log, freqtradeFactory = createFreqtradeClient }) {
+function createBots({ db, sysd, strategies, control, freqtrade, venues, config, log, freqtradeFactory = createFreqtradeClient }) {
   const B = config.bots;
   const clients = new Map();
 
@@ -423,6 +422,7 @@ function createBots({ db, sysd, strategies, control, freqtrade, config, log, fre
     }
     const p = parsed.data;
     if (['main', 'web3-dex-bot'].includes(p.name)) throw conflict(`${p.name} is reserved`);
+    if (venues && !(await venues.isTradable(p.exchange))) throw badRequest(`exchange: Freqtrade does not trade on ${p.exchange}`);
     if ((await db.query('SELECT 1 FROM bots WHERE name = $1', [p.name])).rows[0]) throw conflict(`A bot named ${p.name} exists`);
     const managed = (await db.query('SELECT count(*)::int AS n FROM bots WHERE managed')).rows[0].n;
     if (managed >= B.maxManaged) throw conflict(`At most ${B.maxManaged} managed bots run on this host (memory); delete one first`);
@@ -536,6 +536,17 @@ function createBots({ db, sysd, strategies, control, freqtrade, config, log, fre
     return exchangeKeys(bot);
   }
 
+  // A trading venue's keys (Settings -> Trading venues) for this bot.
+  async function keysFromVenue(name, venueId, actor) {
+    const bot = await getRow(name);
+    const { venue, key, secret, password } = await venues.freqtradeKeys(venueId);
+    if (venue.exchange !== bot.exchange) throw badRequest(`${venue.name} is ${venue.exchange}; ${name} trades on ${bot.exchange}`);
+    if (venue.trading_mode !== bot.trading_mode) throw badRequest(`${venue.name} is set up for ${venue.trading_mode}; ${name} trades ${bot.trading_mode}`);
+    const out = await setExchangeKeys(name, { key, secret, password }, actor);
+    await event(name, actor, 'exchange_keys_from_venue', { venue: venue.name });
+    return out;
+  }
+
   async function removeExchangeKeys(name, actor) {
     const bot = await getRow(name);
     if (!bot.dry_run) throw badRequest(`${name} trades live; switch it to dry-run first`);
@@ -629,8 +640,8 @@ function createBots({ db, sysd, strategies, control, freqtrade, config, log, fre
 
   return {
     list, get, act, setStrategy, create, edit, remove, journal, pauseAll, startAll, repauseRunning,
-    liveChecks, goLive, goDryRun, setExchangeKeys, removeExchangeKeys, exchangeKeys: async (n) => exchangeKeys(await getRow(n)), setCapitalLimit,
-    clientFor, EXCHANGES, createSchema,
+    liveChecks, goLive, goDryRun, setExchangeKeys, keysFromVenue, removeExchangeKeys, exchangeKeys: async (n) => exchangeKeys(await getRow(n)), setCapitalLimit,
+    clientFor, createSchema,
   };
 }
 

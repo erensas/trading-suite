@@ -4,7 +4,7 @@ const { validate } = require('../http/middleware');
 const { notFound } = require('../http/errors');
 const schemas = require('../schemas');
 
-module.exports = function strategyRoutes({ strategies, backtests, identity, audit, requireControl }) {
+module.exports = function strategyRoutes({ strategies, backtests, venues, identity, audit, requireControl }) {
   const router = express.Router();
   const byName = validate({ params: schemas.strategyParam });
   const byId = validate({ params: schemas.idParam });
@@ -57,7 +57,8 @@ module.exports = function strategyRoutes({ strategies, backtests, identity, audi
   });
 
   router.get('/api/backtests', validate({ query: schemas.backtestsQuery }), async (req, res) => {
-    res.json({ success: true, backtests: await backtests.list(req.valid.query), running: backtests.running(), exchanges: backtests.EXCHANGES });
+    const [list, exchanges] = await Promise.all([backtests.list(req.valid.query), venues.exchanges()]);
+    res.json({ success: true, backtests: list, running: backtests.running(), exchanges: exchanges.filter((x) => x.supported).map((x) => x.id) });
   });
 
   router.post('/api/backtests', requireControl, validate({ body: schemas.patch }), async (req, res) => {

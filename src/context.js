@@ -22,6 +22,7 @@ const { createBacktests } = require('./services/backtests');
 const { createBots } = require('./services/bots');
 const { createPineScripts } = require('./services/pine');
 const { createNews } = require('./services/news');
+const { createVenues } = require('./services/venues');
 const { createTickerRefresh } = require('./jobs/ticker-refresh');
 const { requireControl } = require('./http/middleware');
 
@@ -61,11 +62,13 @@ function createContext(overrides = {}) {
   make('control', () => createControl(ctx));
   // Strategy center: the user's systemd manager, the strategy library, backtests, bots.
   make('sysd', () => createSysd(ctx));
+  // Outbound HTTP for news feeds and broker APIs (tests replace it).
+  make('httpFetch', () => (...args) => fetch(...args));
+  make('venues', () => createVenues(ctx));
   make('strategies', () => createStrategies(ctx));
   make('backtests', () => createBacktests(ctx));
   make('bots', () => createBots(ctx));
   make('pineScripts', () => createPineScripts(ctx));
-  make('newsFetch', () => (...args) => fetch(...args));
   make('news', () => createNews(ctx));
   make('reports', () => createReports(ctx));
   make('tickerRefresh', () => createTickerRefresh(ctx));

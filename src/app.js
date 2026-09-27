@@ -47,6 +47,7 @@ function createApp(ctx) {
   app.use(require('./routes/bots')(ctx));
   app.use(require('./routes/pine')(ctx));
   app.use(require('./routes/news')(ctx));
+  app.use(require('./routes/venues')(ctx));
 
   app.use('/api', notFoundHandler);
   app.use(errorHandler());

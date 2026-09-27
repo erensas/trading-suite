@@ -11,7 +11,6 @@ const { TIMEFRAMES } = require('../../lib/providers');
 
 const ROOT = path.join(__dirname, '..', '..');
 const TF_MINUTES = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240, '1d': 1440 };
-const EXCHANGES = ['binance', 'bybit', 'okx', 'kraken', 'kucoin', 'gate', 'bitget', 'htx'];
 
 const PAIR = /^[A-Z0-9]{1,20}\/[A-Z0-9]{1,12}(:[A-Z0-9]{1,12})?$/;
 const paramsSchema = z.object({
@@ -19,7 +18,7 @@ const paramsSchema = z.object({
   pairs: z.array(z.string().trim().toUpperCase().regex(PAIR, 'pairs look like BTC/USDT (or BTC/USDT:USDT for futures)')).min(1, 'at least one pair').max(20, 'at most 20 pairs'),
   timeframe: z.enum(TIMEFRAMES).nullish(),
   days: z.coerce.number().int().min(3).max(730).default(90),
-  exchange: z.enum(EXCHANGES).default('binance'),
+  exchange: z.string().trim().toLowerCase().regex(/^[a-z0-9]{2,30}$/, 'exchange: a ccxt id such as binance').default('binance'),
   trading_mode: z.enum(['spot', 'futures']).default('spot'),
   stake_amount: z.coerce.number().positive().max(1e7).default(100),
   max_open_trades: z.coerce.number().int().min(1).max(50).default(3),
@@ -37,7 +36,7 @@ const tail = (text, n = 40) =>
     .slice(-n)
     .join('\n');
 
-function createBacktests({ db, sysd, strategies, config, log }) {
+function createBacktests({ db, sysd, strategies, venues, config, log }) {
   const baseDir = path.join(config.bots.dir, 'backtests');
   const userdir = path.join(config.bots.dir, 'userdir');
   let running = false;
@@ -54,6 +53,7 @@ function createBacktests({ db, sysd, strategies, config, log }) {
 
   async function create(body, actor) {
     const params = parse(body);
+    if (venues && !(await venues.isTradable(params.exchange))) throw badRequest(`exchange: Freqtrade does not trade on ${params.exchange}`);
     const loc = await strategies.locate(params.strategy);
     if (!loc) throw notFound(`Strategy ${params.strategy} is neither in the library nor in the main bot's folder`);
     if (loc.inLibrary && loc.checkStatus === 'failed') throw badRequest(`${params.strategy} failed its last check; fix it first`);
@@ -216,7 +216,7 @@ function createBacktests({ db, sysd, strategies, config, log }) {
     }
   }
 
-  return { create, list, get, cancel, drain, recover, running: () => currentId, EXCHANGES };
+  return { create, list, get, cancel, drain, recover, running: () => currentId };
 }
 
 module.exports = { createBacktests, paramsSchema };

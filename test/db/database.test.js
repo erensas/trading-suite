@@ -683,7 +683,7 @@ test('phase G: news feeds, tagging, dedupe, per-symbol feeds, insights', { skip 
     'https://feeds.finance.yahoo.com/rss/2.0/headline?s=AAPL&region=US&lang=en-US': rss([['y1', 'Apple services revenue beats estimates'], ['y2', 'Netflix stock slides']]),
   };
   const fetched = [];
-  const newsFetch = async (url) => {
+  const httpFetch = async (url) => {
     fetched.push(url);
     if (!pages[url]) return { ok: false, status: 404, url, text: async () => '' };
     return { ok: true, status: 200, url, text: async () => pages[url] };
@@ -692,7 +692,7 @@ test('phase G: news feeds, tagging, dedupe, per-symbol feeds, insights', { skip 
   const rising = Array.from({ length: 120 }, (_, i) => ({ time: 1790000000 + i * 3600, open: 100 + i, high: 101.5 + i, low: 99 + i, close: 100.8 + i, volume: 5 }));
   const guard = tableGuard({ 'Binance Spot': { candles: rising } });
   guard.method = 'candles';
-  const app = await startApp({ db, guard, newsFetch, freqtrade: fakeFreqtrade({}) });
+  const app = await startApp({ db, guard, httpFetch, freqtrade: fakeFreqtrade({}) });
   t.after(async () => {
     await app.close();
     await db.end();
@@ -747,4 +747,88 @@ test('phase G: news feeds, tagging, dedupe, per-symbol feeds, insights', { skip 
   assert.equal(ins.regime.kind, 'uptrend');
   assert.equal(ins.news.n, 1);
   assert.ok(ins.indicators.length >= 3 && ins.strategies.length >= 1);
+});
+
+test('phase H: trading venues, write-only keys, tests, keys for a bot', { skip }, async (t) => {
+  await resetSchema();
+  await withClient((c) => migrate.up(c, migrate.readMigrations(), quiet));
+  const log = createLogger('silent');
+  const db = createPool({ connectionString: URL_, max: 4, statementTimeoutMs: 3000 }, log);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-venues-'));
+  const exchangesJson = { exchanges: [{ id: 'binance', name: 'Binance', supported: true, modes: ['spot', 'futures'] }, { id: 'kraken', name: 'Kraken', supported: true, modes: ['spot'] }, { id: 'apex', name: 'Apex', supported: false, modes: ['spot'] }] };
+  const runs = [];
+  const sysd = {
+    async run({ argv }) {
+      runs.push(argv);
+      if (argv.includes('exchanges')) return { code: 0, stdout: `VENUE ${JSON.stringify(exchangesJson)}\n`, stderr: '' };
+      if (argv.includes('test')) {
+        const envFile = argv[argv.length - 2];
+        const withKeys = envFile !== '-' && fs.readFileSync(envFile, 'utf8').includes('VENUE_KEY=');
+        return { code: 0, stdout: `VENUE ${JSON.stringify({ ok: true, message: withKeys ? 'keys work' : 'public only', public: { markets: 10 } })}\n`, stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    unitState: async () => ({ active: false }),
+    exec: async () => ({ code: 0, stdout: '', stderr: '' }),
+  };
+  const httpFetch = async (url, init) => {
+    const ok = init.headers['APCA-API-KEY-ID'] === 'PKTESTKEY1234';
+    const body = url.endsWith('/v2/account') ? { status: 'ACTIVE', currency: 'USD', equity: '100000', buying_power: '200000', trading_blocked: false } : [];
+    return { ok, status: ok ? 200 : 401, json: async () => (ok ? body : { message: 'unauthorized' }) };
+  };
+  const app = await startApp({ db, sysd, httpFetch, freqtrade: fakeFreqtrade({}), env: { VENUE_CREDENTIALS_DIR: path.join(tmp, 'venues'), BOTS_DIR: path.join(tmp, 'bots'), BOT_CREDENTIALS_DIR: path.join(tmp, 'botcreds') } });
+  t.after(async () => {
+    await app.close();
+    await db.end();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  const call = (method, url, body) => app.request(method, url, { control: method !== 'GET', body });
+
+  const listed = (await call('GET', '/api/venues')).json;
+  assert.deepEqual(listed.exchanges.map((x) => x.id), ['binance', 'kraken', 'apex']);
+  assert.equal((await call('POST', '/api/venues', { name: 'X', kind: 'cex', exchange: 'nosuch' })).status, 400);
+  assert.equal((await call('POST', '/api/venues', { name: 'X', kind: 'cex', exchange: 'kraken', trading_mode: 'futures' })).status, 400);
+  assert.match((await call('POST', '/api/venues', { name: 'A', kind: 'broker', exchange: 'alpaca', mode: 'live' })).json.error, /paper mode only/);
+  const bin = (await call('POST', '/api/venues', { name: 'Binance main', kind: 'cex', exchange: 'binance', mode: 'live' })).json.venue;
+  const alp = (await call('POST', '/api/venues', { name: 'Alpaca paper', kind: 'broker', exchange: 'alpaca' })).json.venue;
+  assert.equal(alp.mode, 'paper');
+  assert.equal((await call('POST', '/api/venues', { name: 'Binance main', kind: 'cex', exchange: 'binance' })).status, 409);
+
+  // Public test first, then keys (write-only, 0600), then a test that reads the balance.
+  assert.equal((await call('POST', `/api/venues/${bin.id}/test`)).json.result.message, 'public only');
+  const keys = await call('PUT', `/api/venues/${bin.id}/keys`, { key: 'BINANCEKEY9876', secret: 'binancesecretvalue' });
+  assert.equal(keys.json.keys.hint, '…9876');
+  const venueFile = path.join(tmp, 'venues', `${bin.id}.env`);
+  assert.equal(fs.statSync(venueFile).mode & 0o777, 0o600);
+  const all = await call('GET', '/api/venues');
+  assert.ok(!all.text.includes('binancesecretvalue') && !all.text.includes('BINANCEKEY9876'));
+  assert.equal((await call('POST', `/api/venues/${bin.id}/test`)).json.result.message, 'keys work');
+  assert.equal((await db.query('SELECT last_test_ok FROM trading_venues WHERE id = $1', [bin.id])).rows[0].last_test_ok, true);
+
+  // Alpaca paper over its REST API.
+  assert.match((await call('POST', `/api/venues/${alp.id}/test`)).json.result.message, /set the API key/);
+  await call('PUT', `/api/venues/${alp.id}/keys`, { key: 'PKWRONGKEY99', secret: 'wrongsecret123' });
+  assert.match((await call('POST', `/api/venues/${alp.id}/test`)).json.result.message, /HTTP 401/);
+  await call('PUT', `/api/venues/${alp.id}/keys`, { key: 'PKTESTKEY1234', secret: 'rightsecret123' });
+  const ok = (await call('POST', `/api/venues/${alp.id}/test`)).json.result;
+  assert.equal(ok.ok, true);
+  assert.equal(ok.account.equity, 100000);
+
+  // A bot on Binance spot takes the venue's keys; a bot on Kraken does not.
+  await db.query("INSERT INTO bots (name, engine, managed, unit, credentials_file, exchange, trading_mode, strategy) VALUES ('b1', 'freqtrade', TRUE, 'freqtrade-bot@b1.service', $1, 'binance', 'spot', 'X'), ('k1', 'freqtrade', TRUE, 'freqtrade-bot@k1.service', $2, 'kraken', 'spot', 'X')", [path.join(tmp, 'botcreds', 'b1.env'), path.join(tmp, 'botcreds', 'k1.env')]);
+  const copied = await call('POST', '/api/bots/b1/exchange-keys/from-venue', { venueId: bin.id });
+  assert.equal(copied.json.keys.hint, '…9876');
+  assert.match(fs.readFileSync(path.join(tmp, 'botcreds', 'b1.env'), 'utf8'), /^FREQTRADE__EXCHANGE__SECRET=binancesecretvalue$/m);
+  assert.match((await call('POST', '/api/bots/k1/exchange-keys/from-venue', { venueId: bin.id })).json.error, /trades on kraken/);
+  assert.match((await call('POST', '/api/bots/b1/exchange-keys/from-venue', { venueId: alp.id })).json.error, /not a crypto exchange/);
+
+  // Unsupported exchanges are refused for bots and backtests.
+  assert.match((await call('POST', '/api/backtests', { strategy: 'EmaCrossStrategy', pairs: ['BTC/USDT'], exchange: 'apex' })).json.error, /does not trade on apex/);
+
+  // Delete: keys go to the trash folder.
+  assert.equal((await call('DELETE', `/api/venues/${bin.id}`)).status, 200);
+  assert.ok(!fs.existsSync(venueFile));
+  assert.equal(fs.readdirSync(path.join(tmp, 'venues', 'trash')).length, 1);
+  const dex = (await call('GET', '/api/venues/dex')).json;
+  assert.ok(Array.isArray(dex.networks));
 });

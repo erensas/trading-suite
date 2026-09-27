@@ -37,6 +37,7 @@ function loadConfig(env = process.env) {
     bots: {
       dir: env.BOTS_DIR || path.join(home, '.openclaw', 'bots'),
       credentialsDir: env.BOT_CREDENTIALS_DIR || path.join(home, '.openclaw', 'credentials', 'bots'),
+      venueCredentialsDir: env.VENUE_CREDENTIALS_DIR || path.join(home, '.openclaw', 'credentials', 'venues'),
       freqtradeBin: env.FREQTRADE_BIN || '/home/openclaw/.openclaw/worktrees/d89946a92f485818/freqtrade/.venv/bin/freqtrade',
       python: env.FREQTRADE_PYTHON || '/home/openclaw/.openclaw/worktrees/d89946a92f485818/freqtrade/.venv/bin/python3',
       mainStrategiesDir: env.MAIN_STRATEGIES_DIR || '/home/openclaw/.openclaw/workspace/freqtrade/user_data/strategies',

@@ -252,6 +252,7 @@ const journalQuery = z.object({ lines: z.coerce.number().int().min(10).max(2000)
 const goLive = z.object({ confirm: z.string().max(60) });
 const exchangeKeys = z.object({ key: z.string().max(256), secret: z.string().max(256), password: z.string().max(128).nullish() });
 const capitalLimit = z.object({ amount: z.coerce.number().positive().max(1e7) });
+const venueRef = z.object({ venueId: z.coerce.number().int().positive() });
 const backtestsQuery = z.object({ strategy: z.string().regex(STRATEGY_NAME).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
 
 module.exports = {
@@ -269,6 +270,7 @@ module.exports = {
   exchangeKeys,
   capitalLimit,
   backtestsQuery,
+  venueRef,
   SETTING_RULES,
   SETTING_SCHEMAS,
   settingsPatch,

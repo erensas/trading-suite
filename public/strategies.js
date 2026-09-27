@@ -360,8 +360,13 @@
     const box = $('bot-live');
     if (!box) return;
     try {
-      const [checks, keys] = await Promise.all([TS.api(`api/bots/${encodeURIComponent(b.name)}/live-checks`), TS.api(`api/bots/${encodeURIComponent(b.name)}/exchange-keys`)]);
+      const [checks, keys, venues] = await Promise.all([
+        TS.api(`api/bots/${encodeURIComponent(b.name)}/live-checks`),
+        TS.api(`api/bots/${encodeURIComponent(b.name)}/exchange-keys`),
+        TS.api('api/venues').catch(() => ({ venues: [] })),
+      ]);
       const k = keys.keys;
+      const usable = venues.venues.filter((v) => v.kind === 'cex' && v.exchange === b.exchange && v.trading_mode === b.trading_mode && v.keys.configured);
       box.innerHTML = `
         ${b.dry_run ? '' : `<div class="live-banner"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ${esc(b.name)} trades with real money since ${esc(fmtTime(b.live_since))} (approved by ${esc(String(b.live_approved_by || '').replace('trading-suite UI: ', ''))}).</div>`}
         <ul class="check-list">${checks.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}"><i class="fa-solid ${c.ok ? 'fa-circle-check' : 'fa-circle-xmark'}" aria-hidden="true"></i> ${esc(c.text)}</li>`).join('')}</ul>
@@ -380,6 +385,9 @@
               ${k.configured ? '<button type="button" class="btn-secondary" id="bot-keys-remove">Remove</button>' : ''}
             </div>
           </form>
+          ${usable.length
+            ? `<form id="bot-venue-form" class="toolbar-row"><label class="inline-label">Or the keys of a trading venue<select name="venueId">${usable.map((v) => `<option value="${v.id}">${esc(v.name)} (${esc(v.keys.hint)})</option>`).join('')}</select></label><button type="submit" class="btn-secondary">Use these keys</button></form>`
+            : `<div class="muted small">No trading venue with keys for ${esc(b.exchange)} ${esc(b.trading_mode)} (Settings → Trading venues).</div>`}
         </div>
         <div class="toolbar-row">
           ${b.dry_run
@@ -481,6 +489,15 @@
     if (f.id === 'bot-capital-form') {
       await TS.apiSend('PUT', `api/bots/${encodeURIComponent(name)}/capital-limit`, { amount: Number(f.amount.value) }).then(() => toast(name, 'capital limit saved', 'success'), fail('Not saved'));
       openBot(name);
+    }
+    if (f.id === 'bot-venue-form') {
+      try {
+        const r = await TS.apiSend('POST', `api/bots/${encodeURIComponent(name)}/exchange-keys/from-venue`, { venueId: Number(f.venueId.value) });
+        toast(name, `exchange keys taken from the venue (${r.keys.hint})`, 'success');
+        openBot(name);
+      } catch (err) {
+        toast(`${name}: keys not set`, err.message, 'error');
+      }
     }
     if (f.id === 'bot-keys-form') {
       const body = { key: f.key.value.trim(), secret: f.secret.value.trim(), password: f.password.value.trim() || null };

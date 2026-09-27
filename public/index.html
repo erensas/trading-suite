@@ -384,6 +384,7 @@
           <button type="button" class="tf-btn" data-settings="instruments">Instruments</button>
           <button type="button" class="tf-btn" data-settings="integrations">Integrations</button>
           <button type="button" class="tf-btn" data-settings="news">News feeds</button>
+          <button type="button" class="tf-btn" data-settings="venues">Trading venues</button>
         </div>
 
         <div class="settings-pane" id="settings-general">
@@ -455,6 +456,48 @@
             </form>
             <div class="hint">The news job reads every enabled feed every 15 minutes (https only, up to 3 MB), keeps 30 days, drops headlines already seen from another feed, and tags each article with the assets it names: tickers in capitals (BTC, $AAPL), common coin names (Bitcoin, Ether, Solana…) and the names of registered stocks. A per-symbol feed is read once for each active TradFi instrument, with <code>{ticker}</code> in its URL. The tone dot is a keyword count (surge, rally… vs. plunge, hack…), not a model.</div>
           </div>
+        </div>
+
+        <div class="settings-pane hidden" id="settings-venues">
+          <div class="card">
+            <div class="card-header wrap"><div class="card-title"><i class="fa-solid fa-building-columns"></i> Trading venues</div><span class="muted small">Exchange and broker accounts: keys, connection tests</span></div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>Venue</th><th>Kind</th><th>Exchange</th><th>Market</th><th>Keys for</th><th>API keys</th><th>Last test</th><th>On</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody id="venues-tbody"></tbody>
+              </table>
+            </div>
+            <form id="venue-form" class="toolbar-row venue-form">
+              <input name="name" placeholder="Name, e.g. Binance main" maxlength="60" required aria-label="Venue name">
+              <select name="kind" aria-label="Kind"><option value="cex">Crypto exchange</option><option value="broker">Stock broker</option></select>
+              <select name="exchange" aria-label="Exchange"></select>
+              <select name="trading_mode" aria-label="Market"><option value="spot">Spot</option><option value="futures">Futures</option></select>
+              <select name="mode" aria-label="What the keys are for"><option value="read_only">Keys: read only</option><option value="live">Keys: live trading</option></select>
+              <input name="notes" placeholder="Notes (optional)" maxlength="300" aria-label="Notes">
+              <button type="submit" class="btn-buy"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add venue</button>
+            </form>
+            <div class="hint">Crypto exchanges are traded through Freqtrade (ccxt); the list below the form is Freqtrade's own. API keys are written to <code>~/.openclaw/credentials/venues/&lt;id&gt;.env</code> (0600) and never shown again, only their last four characters. <b>Test</b> reads the markets and a ticker, and with keys the balance, in a sandboxed unit; it never orders or withdraws. Use exchange keys without withdrawal rights, limited to this server's IP. A managed bot takes a venue's keys under Strategies → Details → Live trading. Alpaca connects in paper mode only (its paper-trading API).</div>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header"><div class="card-title"><i class="fa-solid fa-bolt"></i> DEX: the Web3 engine (read only)</div></div>
+              <div id="venues-dex" class="muted small">Loading…</div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title"><i class="fa-solid fa-route"></i> Adding markets and interfaces</div></div>
+              <ol class="howto">
+                <li><b>An instrument</b> (a coin, a futures contract, a DEX pool, a stock): Ctrl+K, search, Add. It lands on a watchlist with every provider that carries it as a data source.</li>
+                <li><b>A data source</b> for prices and candles: Settings → Data providers (Binance, OKX, Bybit, GeckoTerminal, Yahoo, Freqtrade, or any REST API through a URL template), then the plug button next to the chart.</li>
+                <li><b>A trading venue</b>: add it here with its API keys and test it.</li>
+                <li><b>Trading on it</b>: Strategies → New bot on that exchange (dry-run), and after the checks, Live trading with the venue's keys.</li>
+                <li><b>News</b>: Settings → News feeds (any RSS or Atom feed).</li>
+              </ol>
+            </div>
+          </div>
+          <details class="card">
+            <summary class="card-title"><i class="fa-solid fa-list"></i> Exchanges in Freqtrade <span class="muted small" id="venues-ex-count"></span></summary>
+            <div class="table-container"><table><thead><tr><th>Exchange</th><th>ccxt id</th><th>Freqtrade support</th><th>Markets</th><th>Note</th></tr></thead><tbody id="venues-ex-tbody"></tbody></table></div>
+          </details>
         </div>
 
         <div class="settings-pane hidden" id="settings-integrations">
@@ -716,5 +759,6 @@
   <script src="pine-ui.js"></script>
   <script src="insights.js"></script>
   <script src="insights-ui.js"></script>
+  <script src="venues-ui.js"></script>
 </body>
 </html>

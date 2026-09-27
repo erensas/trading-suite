@@ -145,11 +145,11 @@ function assetOf(symbol, category) {
   return s.split('/')[0];
 }
 
-function createNews({ db, log, newsFetch = (...a) => fetch(...a) }) {
+function createNews({ db, log, httpFetch = (...a) => fetch(...a) }) {
   const state = { running: false, lastRunAt: null, lastResult: null };
 
   async function fetchText(url) {
-    const res = await newsFetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.5' }, redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const res = await httpFetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.5' }, redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (!/^https:/.test(res.url || url)) throw new Error('redirected away from https');
     const body = await res.text();

@@ -5,13 +5,14 @@ const { validate } = require('../http/middleware');
 const { badRequest } = require('../http/errors');
 const schemas = require('../schemas');
 
-module.exports = function botRoutes({ bots, identity, audit, requireControl }) {
+module.exports = function botRoutes({ bots, venues, identity, audit, requireControl }) {
   const router = express.Router();
   const byName = validate({ params: schemas.botParam });
   const actor = (req) => identity.actorLabel(req);
 
   router.get('/api/bots', async (req, res) => {
-    res.json({ success: true, bots: await bots.list(), exchanges: bots.EXCHANGES });
+    const [list, exchanges] = await Promise.all([bots.list(), venues.exchanges()]);
+    res.json({ success: true, bots: list, exchanges: exchanges.filter((x) => x.supported).map((x) => x.id) });
   });
 
   router.get('/api/bots/:name', byName, async (req, res) => {
@@ -80,6 +81,13 @@ module.exports = function botRoutes({ bots, identity, audit, requireControl }) {
     const { name } = req.valid.params;
     const keys = await bots.setExchangeKeys(name, req.valid.body, actor(req));
     await audit(req, 'update', 'bot exchange keys', name, null, { hint: keys.hint });
+    res.json({ success: true, keys });
+  });
+
+  router.post('/api/bots/:name/exchange-keys/from-venue', requireControl, byName, validate({ body: schemas.venueRef }), async (req, res) => {
+    const { name } = req.valid.params;
+    const keys = await bots.keysFromVenue(name, req.valid.body.venueId, actor(req));
+    await audit(req, 'update', 'bot exchange keys', name, null, { hint: keys.hint, venue: req.valid.body.venueId });
     res.json({ success: true, keys });
   });
 

@@ -3,6 +3,7 @@
 [extend]
 useDefault = true
 
-[[allowlists]]
+# [allowlist] (not [[allowlists]]): older gitleaks releases ignore the array form.
+[allowlist]
 description = "Fake credentials and published test vectors in tests"
 paths = ['''^test/''']
